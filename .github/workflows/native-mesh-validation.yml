@@ -6,8 +6,8 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: native-mesh-${{ github.ref }}
-  cancel-in-progress: false
+  group: native-mesh-${{ github.sha }}
+  cancel-in-progress: true
 jobs:
   changed-components:
     runs-on: ubuntu-latest
