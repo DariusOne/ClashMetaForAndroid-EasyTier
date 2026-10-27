@@ -73,6 +73,18 @@ func (d *Dispatcher) Run(parent context.Context) error {
 						d.Counters.EngineDrop.Add(1)
 						continue
 					}
+					// Ownership can change while a packet waits behind a slow
+					// engine. Recheck at dispatch: withdrawn mesh packets and
+					// newly claimed destinations must never use the old queue.
+					owner := Clash
+					if mesh {
+						owner = EasyTier
+					}
+					address, err := DestinationIP(packet)
+					if ctx.Err() != nil || err != nil || d.Policy.Decide(address) != owner {
+						d.Counters.PolicyDrop.Add(1)
+						continue
+					}
 					if err := port.WritePacket(packet); err != nil {
 						d.Counters.EngineDrop.Add(1)
 						fail()
