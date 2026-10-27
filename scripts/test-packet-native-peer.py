@@ -51,6 +51,10 @@ class Echo:
                     self.socket.sendto(data, peer)
                 else:
                     conn, peer = self.socket.accept()
+                    # Count the TCP accept itself, even if no payload follows.
+                    # Otherwise a leaked connection with an empty/slow body
+                    # could falsely satisfy the REJECT zero-origin assertion.
+                    self.sources.append(peer[0])
                     with conn:
                         conn.settimeout(5)
                         data = b""
@@ -59,7 +63,6 @@ class Echo:
                             if not chunk:
                                 break
                             data += chunk
-                        self.sources.append(peer[0])
                         conn.sendall(data)
             except (TimeoutError, OSError):
                 if self.done.is_set():
