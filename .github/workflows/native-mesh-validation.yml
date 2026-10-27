@@ -22,6 +22,8 @@ jobs:
           echo "$RUNNER_TEMP/go/bin" >> "$GITHUB_PATH"
       - name: Race, socket transport and fuzz tests
         working-directory: native/packet-router
+        env:
+          CGO_ENABLED: '1'
         run: |
           go test -race -count=1 -timeout 90s -coverprofile=coverage.out ./...
           go test -run '^$' -fuzz FuzzDestinationIP -fuzztime 15s
@@ -44,7 +46,7 @@ jobs:
           sudo apt-get install -y protobuf-compiler cmake clang pkg-config
           rustup toolchain install 1.95.0 --profile minimal
           rustup target add --toolchain 1.95.0 aarch64-linux-android x86_64-linux-android
-          sdkmanager 'ndk;29.0.14206865'
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'ndk;29.0.14206865'
       - name: Native config validation tests
         if: matrix.abi == 'x86_64'
         env:
@@ -59,3 +61,4 @@ jobs:
           path: core/build/native-jni/${{ matrix.abi }}/
           if-no-files-found: error
           retention-days: 14
+
