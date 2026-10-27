@@ -14,6 +14,13 @@ working CMFA. It has one VpnService and a separate, unexported native engine
 process. Its native JNI libraries are verified before packaging. Compile success
 and the APK manifest check are not phone or networking acceptance.
 
+CI also contains an Android API 30 x86_64 emulator lifecycle test: a newly
+created local-only profile starts and stops the single VPN ten times, checks
+native startup and Android mesh address installation/removal, and saves its
+result separately. It has no real mesh peer and does not establish peer traffic,
+DNS/Fake-IP correctness, phone compatibility or discovery support. Never run
+this disposable-data test on a phone containing user configuration.
+
 After installing that debug APK on an explicitly approved test device, import a
 disposable Clash YAML through its existing UI. Keep its system HTTP proxy off.
 Prepare a disposable EasyTier TOML in an ignored private directory. Do not use a

@@ -44,15 +44,28 @@ class PacketHarness private constructor(private val vpn: VpnService, private val
     private var initialRoutes = emptySet<String>()
     private val directory get() = File(vpn.noBackupFilesDir, "native-mesh-acceptance")
 
+    // Private, fixed-code diagnostics for the opt-in harness. No config,
+    // endpoint, network secret or native exception is written here.
+    private fun status(stage: String) {
+        runCatching {
+            val temp = File(directory, "status.tmp")
+            temp.writeText(JSONObject().put("schema", 1).put("generation", generation).put("stage", stage).toString())
+            Os.chmod(temp.path, 384)
+            check(temp.renameTo(File(directory, "status.json")))
+        }
+    }
+
     private fun failClosed(code: String) {
         NativePacketRouter.failClosed(generation)
         if (failed) return
         failed = true
+        status(code)
         Log.w(code) // fixed code only, never a TOML/parser/endpoint error
         scope.launch(Dispatchers.IO) { native?.close() }
     }
 
     suspend fun open(tun: TunModule, allowRouteGrowth: Boolean, createVpn: (List<Address>, Set<String>) -> TunModule.TunDevice) {
+        status("starting")
         val profile = File(directory, "mesh.toml")
         check(profile.isFile && profile.length() in 1..1024L * 1024) { "ET_PROFILE_REQUIRED" }
         val phone = File(directory, "phone-id")
@@ -102,6 +115,8 @@ class PacketHarness private constructor(private val vpn: VpnService, private val
                 // start adopts each detached FD, including on error.
                 tun.attachPacket(deviceFd.detachFd(), pair.first.detachFd(), configuration.toString())
                 check(!failed) { "ET_ENGINE_LOST" }
+                check(NativePacketRouter.update(native!!.snapshot(), installed.joinToString(",") { it.cidr }))
+                status("active")
             } finally { deviceFd.close(); pair.first.close(); pair.second.close() }
             monitor = scope.launch(Dispatchers.IO) {
                 while (isActive && !failed) {
@@ -141,6 +156,7 @@ class PacketHarness private constructor(private val vpn: VpnService, private val
         NativePacketRouter.failClosed(generation)
         monitor?.cancelAndJoin(); monitor = null
         withContext(Dispatchers.IO) { native?.close(); native = null }
+        status("stopped")
     }
 
     private fun physicalNetwork(): Pair<String, List<String>> {
