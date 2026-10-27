@@ -118,6 +118,14 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           submodules: true
+      - name: Cache locked host compiler inputs (tests always run)
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: |
+            ~/.cargo/registry/
+            ~/.cargo/git/
+            native/easytier-bridge/target/
+          key: native-host-rust195-v1-${{ runner.os }}-${{ hashFiles('native/easytier-bridge/Cargo.lock', 'native/easytier-bridge/Cargo.toml', 'native/easytier-bridge/src/**/*.rs') }}
       - name: Install host build dependencies
         run: |
           sudo apt-get update
@@ -135,6 +143,15 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           submodules: recursive
+      - name: Cache compiler dependencies (APK and tests always rebuild)
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: |
+            ~/.gradle/caches/
+            ~/.gradle/wrapper/
+            ~/.cache/go-build/
+            ~/go/pkg/mod/
+          key: packet-compiler-v1-${{ runner.os }}-jdk21-go126-c1278af-${{ hashFiles('**/go.mod', '**/go.sum', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties', '.github/patch/*.patch') }}
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
           name: native-prototype-arm64-v8a

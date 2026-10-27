@@ -5,6 +5,8 @@ import android.net.VpnService
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.github.kr328.clash.remote.Remote
+import com.github.kr328.clash.core.Clash
+import com.github.kr328.clash.core.model.TunnelState
 import com.github.kr328.clash.service.TunService
 import com.github.kr328.clash.service.model.Profile
 import com.github.kr328.clash.service.model.AccessControlMode
@@ -12,6 +14,7 @@ import com.github.kr328.clash.service.store.ServiceStore
 import com.github.kr328.clash.service.util.pendingDir
 import com.github.kr328.clash.util.stopClashService
 import com.github.kr328.clash.util.withProfile
+import com.github.kr328.clash.util.withClash
 import java.io.File
 import kotlinx.coroutines.*
 import org.json.JSONObject
@@ -61,6 +64,8 @@ class NativeMeshPeerTest {
             File(folder, "status.json").delete()
             File(folder, "peer-ready").delete()
             File(folder, "peer-result.json").delete()
+            File(folder, "mode-request.json").delete()
+            File(folder, "mode-ready.json").delete()
             File(folder, "enable").writeText("packet-path-only")
             context.startForegroundService(Intent(context, TunService::class.java))
             withTimeout(45_000) {
@@ -71,9 +76,32 @@ class NativeMeshPeerTest {
                 }
             }
             File(folder, "peer-ready").writeText("ready")
+            var sequence = 0
             withTimeout(180_000) {
                 while (!File(folder, "peer-result.json").exists()) {
                     check(stage() == "active") { "Native peer stopped during packet probes" }
+                    val request = runCatching { JSONObject(File(folder, "mode-request.json").readText()) }.getOrNull()
+                    if (request != null && request.optInt("sequence") > sequence) {
+                        val mode = when (request.getString("mode")) {
+                            "direct" -> TunnelState.Mode.Direct
+                            "global" -> TunnelState.Mode.Global
+                            "rule" -> TunnelState.Mode.Rule
+                            else -> error("Invalid disposable test mode")
+                        }
+                        withClash {
+                            val options = queryOverride(Clash.OverrideSlot.Session)
+                            options.mode = mode
+                            patchOverride(Clash.OverrideSlot.Session, options)
+                        }
+                        withTimeout(15_000) {
+                            while (withClash { queryTunnelState().mode } != mode) delay(100)
+                            if (mode == TunnelState.Mode.Global) {
+                                while (!withClash { patchSelector("GLOBAL", "REJECT") }) delay(100)
+                            }
+                        }
+                        sequence = request.getInt("sequence")
+                        File(folder, "mode-ready.json").writeText(JSONObject().put("sequence", sequence).toString())
+                    }
                     delay(100)
                 }
             }
@@ -83,8 +111,9 @@ class NativeMeshPeerTest {
         } finally {
             context.stopClashService()
             withTimeoutOrNull(15_000) { while (stage() != "stopped") delay(100) }
+            withClash { clearOverride(Clash.OverrideSlot.Session) }
             id?.let { withProfile { delete(it) } }
-            for (name in listOf("enable", "mesh.toml", "ci-peer-guard", "ci-reject-port", "peer-ready", "peer-result.json")) File(folder, name).delete()
+            for (name in listOf("enable", "mesh.toml", "ci-peer-guard", "ci-reject-port", "peer-ready", "peer-result.json", "mode-request.json", "mode-ready.json")) File(folder, name).delete()
             Remote.service.unbind()
         }
     }

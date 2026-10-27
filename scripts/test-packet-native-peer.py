@@ -181,6 +181,36 @@ def main():
             if denied.returncode == 0 or reject.sources:
                 raise RuntimeError("Original nonmesh REJECT rule was bypassed")
             result["checks"]["nonmesh_original_reject_rule"] = {"passed": True, "origin_connections": 0}
+            # Match real CMFA modes without changing the native mesh session.
+            # Global uses REJECT deliberately: only unrelated destinations
+            # should be rejected, while mesh TCP still takes native EasyTier.
+            for sequence, mode in enumerate(("direct", "global", "rule"), 1):
+                stage("mode-request.json", json.dumps({"sequence": sequence, "mode": mode}))
+                deadline = time.monotonic() + 20
+                while time.monotonic() < deadline:
+                    state = subprocess.run(adb + ["shell", "run-as", PACKAGE, "cat", FOLDER + "mode-ready.json"], capture_output=True, text=True, timeout=10)
+                    try:
+                        ready_sequence = json.loads(state.stdout).get("sequence")
+                    except (ValueError, AttributeError):
+                        ready_sequence = None
+                    if state.returncode == 0 and ready_sequence == sequence:
+                        break
+                    time.sleep(0.2)
+                else:
+                    raise RuntimeError("Original CMFA mode did not apply: " + mode)
+                echo = Echo(False)
+                stack.callback(echo.close)
+                output = call("shell", "/data/local/tmp/cmfa-mesh-probe", "tcp-client", "10.126.0.1", str(echo.port), timeout=60)
+                if "PASS 5/5" not in output or echo.sources != ["10.126.0.2"] * 5:
+                    raise RuntimeError("Mesh path changed with CMFA mode: " + mode)
+                before = len(reject.sources)
+                probe = subprocess.run(adb + ["shell", "/data/local/tmp/cmfa-mesh-probe", "tcp-client", "10.0.2.2", str(reject.port)], capture_output=True, text=True, timeout=30)
+                if mode == "direct":
+                    if probe.returncode or "PASS 5/5" not in probe.stdout or len(reject.sources) != before + 5 or "10.126.0.2" in reject.sources[before:]:
+                        raise RuntimeError("CMFA Direct behavior changed")
+                elif probe.returncode == 0 or len(reject.sources) != before:
+                    raise RuntimeError("CMFA rejection bypassed: " + mode)
+                result["checks"]["mode_" + mode] = {"mesh_tcp": "5/5", "nonmesh_expected": "direct" if mode == "direct" else "reject", "passed": True}
             for mode, port in (("tcp", 27441), ("udp", 27442)):
                 helper = subprocess.Popen(adb + ["shell", "/data/local/tmp/cmfa-mesh-probe", mode + "-server", "0.0.0.0", str(port)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
                 helpers.append(helper)
