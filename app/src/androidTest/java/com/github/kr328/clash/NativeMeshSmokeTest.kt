@@ -1,5 +1,6 @@
 package com.github.kr328.clash
 
+import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.net.VpnService
@@ -78,6 +79,20 @@ class NativeMeshSmokeTest {
                 assertTrue("Mesh address missing from Android interface", ownsMeshAddress())
                 delay(1_500)
                 assertEquals("Native monitor must still be healthy", "active", readStage().getString("stage"))
+                if (it == 9) {
+                    // Kill only our disposable native process, never the VPN
+                    // owner. The caller UID/package and emulator are checked.
+                    val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                    val child = am.runningAppProcesses.single { process -> process.processName == "${context.packageName}:native_mesh" }
+                    assertEquals(context.applicationInfo.uid, child.uid)
+                    InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand("run-as ${context.packageName} kill -9 ${child.pid}").use { fd ->
+                        android.os.ParcelFileDescriptor.AutoCloseInputStream(fd).use { stream -> stream.readBytes() }
+                    }
+                    withTimeout(15_000) { while (!readStage().optString("stage").startsWith("ET_")) delay(100) }
+                    delay(1_500)
+                    assertTrue("Native death must not remove the VPN owner", ownsMeshAddress())
+                    assertTrue("Engine death must remain closed", readStage().optString("stage").startsWith("ET_"))
+                }
                 context.stopClashService()
                 awaitStage("stopped", 15_000)
                 withTimeout(15_000) { while (ownsMeshAddress() || File(context.filesDir, "service_running.lock").exists()) delay(100) }
@@ -97,7 +112,7 @@ class NativeMeshSmokeTest {
         while (true) {
             state = readStage()
             val stage = state.optString("stage")
-            check(!stage.startsWith("ET_")) { stage }
+            check(expected == "stopped" || !stage.startsWith("ET_")) { stage }
             if (stage == expected) break
             delay(100)
         }

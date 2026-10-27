@@ -46,7 +46,8 @@ class PacketHarness private constructor(private val vpn: VpnService, private val
 
     // Private, fixed-code diagnostics for the opt-in harness. No config,
     // endpoint, network secret or native exception is written here.
-    private fun status(stage: String) {
+    @Synchronized private fun status(stage: String) {
+        if (stage == "active" && failed) return
         runCatching {
             val temp = File(directory, "status.tmp")
             temp.writeText(JSONObject().put("schema", 1).put("generation", generation).put("stage", stage).toString())
@@ -115,7 +116,9 @@ class PacketHarness private constructor(private val vpn: VpnService, private val
                 // start adopts each detached FD, including on error.
                 tun.attachPacket(deviceFd.detachFd(), pair.first.detachFd(), configuration.toString())
                 check(!failed) { "ET_ENGINE_LOST" }
-                check(NativePacketRouter.update(native!!.snapshot(), installed.joinToString(",") { it.cidr }))
+                val attached = native!!.snapshot()
+                check(JSONObject(attached).let { it.getBoolean("running") && it.getBoolean("attached") }) { "ET_ENGINE_NOT_READY" }
+                check(NativePacketRouter.update(attached, installed.joinToString(",") { it.cidr }))
                 status("active")
             } finally { deviceFd.close(); pair.first.close(); pair.second.close() }
             monitor = scope.launch(Dispatchers.IO) {
@@ -123,6 +126,10 @@ class PacketHarness private constructor(private val vpn: VpnService, private val
                     try {
                         val raw = native!!.snapshot()
                         val next = JSONObject(raw)
+                        if (!next.getBoolean("running") || !next.getBoolean("attached")) {
+                            failClosed("ET_ENGINE_NOT_READY")
+                            break
+                        }
                         // The harness closes on changes needing a new Android
                         // interface. Production transactional rebuild is gated.
                         if (readAddresses(next) != installed || (!allowRouteGrowth && readRoutes(next).any { !covered(it) }) || physicalNetwork().first != networkKey) {

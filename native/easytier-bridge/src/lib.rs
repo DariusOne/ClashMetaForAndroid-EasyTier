@@ -4,6 +4,7 @@
 
 use easytier::{
     common::config::{ConfigFileControl, ConfigLoader, Flags, TomlConfigLoader, gen_default_flags},
+    common::global_ctx::GlobalCtxEvent,
     instance_manager::NetworkInstanceManager,
 };
 use jni::{
@@ -13,7 +14,7 @@ use jni::{
 };
 use serde_json::json;
 #[cfg(unix)]
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::fd::{FromRawFd, OwnedFd};
 use std::{
     ptr,
     sync::{LazyLock, Mutex},
@@ -27,6 +28,7 @@ struct Session {
     // Drop the engine (which joins its workers) BEFORE the borrowed packet fd.
     manager: NetworkInstanceManager,
     configured_ipv6: Option<String>,
+    packet_ready: bool,
     #[cfg(unix)]
     packet: Option<OwnedFd>,
 }
@@ -38,6 +40,16 @@ impl Drop for Session {
 }
 
 static SESSION: LazyLock<Mutex<Option<Session>>> = LazyLock::new(|| Mutex::new(None));
+
+// Upstream queues the descriptor asynchronously. Only its matching successful
+// device event acknowledges initialization; queuing a descriptor is insufficient.
+fn packet_event(event: GlobalCtxEvent, expected: &str) -> Result<bool, &'static str> {
+    match event {
+        GlobalCtxEvent::TunDeviceReady(name) => Ok(name == expected),
+        GlobalCtxEvent::TunDeviceError(_) => Err("ET_PACKET_DEVICE_FAILED"),
+        _ => Ok(false),
+    }
+}
 
 // Failures use fixed codes; upstream parser errors may contain passwords/URIs.
 fn config(text: &str, id: uuid::Uuid) -> Result<TomlConfigLoader, &'static str> {
@@ -182,6 +194,7 @@ pub extern "system" fn Java_com_github_kr328_clash_core_easytier_NativeEasyTier_
             id,
             manager,
             configured_ipv6,
+            packet_ready: false,
             #[cfg(unix)]
             packet: None,
         });
@@ -245,12 +258,31 @@ pub extern "system" fn Java_com_github_kr328_clash_core_easytier_NativeEasyTier_
             return Err("ET_PACKET_FD_INVALID");
         }
         let owned = unsafe { OwnedFd::from_raw_fd(duplicate) };
+        let mut events = session
+            .manager
+            .iter()
+            .find(|instance| *instance.key() == session.id)
+            .and_then(|instance| instance.subscribe_event())
+            .ok_or("ET_STATUS_UNAVAILABLE")?;
+        // Keep the descriptor owned even on a timeout: native code may still be
+        // attaching it. Session shutdown joins workers before closing this FD.
+        session.packet = Some(owned);
         session
             .manager
-            .set_tun_fd(&session.id, owned.as_raw_fd())
+            .set_tun_fd(&session.id, duplicate)
             .map_err(|_| "ET_ATTACH_FAILED")?;
-        session.packet = Some(owned);
-        Ok(())
+        let expected = format!("tunfd_{duplicate}");
+        let start = std::time::Instant::now();
+        while start.elapsed() < std::time::Duration::from_secs(5) {
+            if let Ok(event) = events.try_recv()
+                && packet_event(event, &expected)?
+            {
+                session.packet_ready = true;
+                return Ok(());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        Err("ET_PACKET_DEVICE_TIMEOUT")
     })();
     #[cfg(not(target_os = "android"))]
     let result: Result<(), &'static str> = {
@@ -314,7 +346,7 @@ pub extern "system" fn Java_com_github_kr328_clash_core_easytier_NativeEasyTier_
             }
         }
         #[cfg(unix)]
-        let attached = session.packet.is_some();
+        let attached = session.packet.is_some() && session.packet_ready;
         #[cfg(not(unix))]
         let attached = false;
         Ok(json!({"schema":1,"generation":generation,"running":info.running && info.error_msg.is_none(),"attached":attached,"addresses":addresses,"routes":routes}).to_string())
@@ -355,6 +387,24 @@ pub extern "system" fn Java_com_github_kr328_clash_core_easytier_NativeEasyTier_
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn attachment_requires_matching_native_event_and_redacts_errors() {
+        assert_eq!(
+            packet_event(GlobalCtxEvent::TunDeviceReady("tunfd_9".into()), "tunfd_9"),
+            Ok(true)
+        );
+        assert_eq!(
+            packet_event(GlobalCtxEvent::TunDeviceReady("tunfd_8".into()), "tunfd_9"),
+            Ok(false)
+        );
+        assert_eq!(
+            packet_event(
+                GlobalCtxEvent::TunDeviceError("private-native-error".into()),
+                "tunfd_9"
+            ),
+            Err("ET_PACKET_DEVICE_FAILED")
+        );
+    }
     #[test]
     fn errors_are_fixed_codes() {
         let secret = "do-not-print-this-network-secret";

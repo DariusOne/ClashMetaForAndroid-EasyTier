@@ -37,7 +37,9 @@ is available in `native/easytier-upstream/easytier/LICENSE`.
 - A JNI native EasyTier adapter with one active instance, independent phone ID,
   borrowed packet descriptor duplication, generation checks and fixed errors.
   Status projection excludes TOML, secrets, public peer endpoints and raw events.
-- A dormant CMFA Go lifecycle adapter and a gVisor packet endpoint reusing the
+  Attachment waits for the matching native device-ready event; merely enqueuing
+  an FD does not mark the mesh ready. Initialization errors remain fixed codes.
+- An opt-in CMFA Go lifecycle adapter and a gVisor packet endpoint reusing the
   real Mihomo inbound handler. The host TCP/UDP echo test exercises packet decode
   and return framing; its mock policy delegate does not prove Android routing.
 - A JNI packet-session entry point and a private bound Android engine service in

@@ -16,7 +16,8 @@ and the APK manifest check are not phone or networking acceptance.
 
 CI also contains an Android API 30 x86_64 emulator lifecycle test: a newly
 created local-only profile starts and stops the single VPN ten times, checks
-native startup and Android mesh address installation/removal, and saves its
+native startup and Android mesh address installation/removal, kills only the
+disposable native child on the last cycle to check VPN-owner survival, and saves its
 result separately. It has no real mesh peer and does not establish peer traffic,
 DNS/Fake-IP correctness, phone compatibility or discovery support. Never run
 this disposable-data test on a phone containing user configuration.
