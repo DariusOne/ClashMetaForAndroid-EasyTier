@@ -1,4 +1,10 @@
-## Clash Meta for Android
+## Clash Meta for Android + native EasyTier (work in progress)
+
+**开发中：当前仅完成原生组网的数据通道基础组件，尚未交付集成 APK。**
+只让 EasyTier 管理的地址进入组网，其余流量保留 CMFA 原配置语义。
+实现进度、测试边界和待完成验收见 [Native integration status](docs/easytier/IMPLEMENTATION.md)。
+
+## Upstream Clash Meta for Android
 
 A Graphical user interface of [Clash.Meta](https://github.com/MetaCubeX/Clash.Meta) for Android
 

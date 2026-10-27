@@ -64,3 +64,11 @@ google-services.json
 
 # MacOS
 .DS_Store
+
+# Native integration build products and private device inputs
+target/
+coverage.out
+*.test
+*.test.exe
+/private-device/
+/artifacts/
