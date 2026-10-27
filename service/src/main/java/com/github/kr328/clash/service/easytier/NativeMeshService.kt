@@ -92,8 +92,8 @@ class NativeMeshService : Service() {
                             reply.writeNoException()
                         }
                     }
-                } catch (_: Throwable) {
-                    reply.writeException(IllegalStateException("ET_ENGINE_COMMAND_FAILED"))
+                } catch (error: Throwable) {
+                    reply.writeException(IllegalStateException(NativeMeshProtocol.safeError(error)))
                 }
             } } finally { deadline.cancel(false) }
             return true

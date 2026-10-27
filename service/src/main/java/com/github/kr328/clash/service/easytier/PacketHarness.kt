@@ -77,7 +77,7 @@ class PacketHarness private constructor(private val vpn: VpnService, private val
         // is created. It is kept closed to application traffic while DHCP runs.
         val bootstrap = ParcelFileDescriptor.adoptFd(createVpn(emptyList(), emptySet()).fd)
         try {
-            native = NativeMeshClient.bind(vpn) { failClosed("ET_ENGINE_LOST") }
+            native = NativeMeshClient.bind(vpn) { code -> failClosed(code) }
             native!!.start(profile, phoneId, generation, ownUidExcluded = true)
             val first = withTimeout(30_000) {
                 var state: JSONObject

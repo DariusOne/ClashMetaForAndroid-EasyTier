@@ -314,7 +314,21 @@ pub extern "system" fn Java_com_github_kr328_clash_core_easytier_NativeEasyTier_
             .manager
             .collect_network_infos_sync()
             .map_err(|_| "ET_STATUS_UNAVAILABLE")?;
-        let info = infos.get(&session.id).ok_or("ET_STATUS_UNAVAILABLE")?;
+        // The launcher starts asynchronously. Before its RPC service exists,
+        // upstream deliberately omits the instance from collect_network_infos.
+        // This is a pending startup, not a dead Binder/engine. Never claim an
+        // address or readiness until an actual running snapshot is available.
+        let Some(info) = infos.get(&session.id) else {
+            let failed = session
+                .manager
+                .iter()
+                .find(|instance| *instance.key() == session.id)
+                .is_none_or(|instance| instance.get_latest_error_msg().is_some());
+            if failed {
+                return Err("ET_START_FAILED");
+            }
+            return Ok(json!({"schema":1,"generation":generation,"running":false,"attached":false,"addresses":[],"routes":[]}).to_string());
+        };
         // Deliberately omit raw config, events, public endpoints and network secret.
         let mut addresses = Vec::new();
         if let Some(ip) = info

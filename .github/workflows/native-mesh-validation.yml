@@ -154,7 +154,7 @@ jobs:
           cd "$RUNNER_TEMP/go"
           for p in "$GITHUB_WORKSPACE"/.github/patch/*.patch; do patch -p 1 < "$p"; done
       - name: Compile opt-in packet prototype with a separate application ID
-        run: ./gradlew --no-daemon -PnativeMeshHarness=true app:assembleMetaDebug app:assembleMetaDebugAndroidTest
+        run: ./gradlew --no-daemon -PnativeMeshHarness=true service:testMetaDebugUnitTest app:assembleMetaDebug app:assembleMetaDebugAndroidTest
       - name: Verify separate identity and both native libraries in APK
         run: python3 scripts/verify-packet-prototype.py app/build/outputs/apk/meta/debug
       - name: Enable KVM for disposable CI emulator

@@ -22,7 +22,7 @@ import kotlinx.coroutines.withTimeout
  */
 class NativeMeshClient private constructor(
     private val context: Context,
-    private val onEngineLost: () -> Unit
+    private val onEngineLost: (String) -> Unit
 ) : Closeable {
     private val connected = CompletableDeferred<IBinder>()
     private val closed = AtomicBoolean()
@@ -47,7 +47,7 @@ class NativeMeshClient private constructor(
     private fun lost() {
         remote = null
         connected.completeExceptionally(IllegalStateException("ET_ENGINE_UNAVAILABLE"))
-        if (!closed.get()) onEngineLost()
+        if (!closed.get()) onEngineLost("ET_ENGINE_LOST")
     }
 
     suspend fun start(profile: File, phoneId: String, session: Long, ownUidExcluded: Boolean) = withContext(Dispatchers.IO) {
@@ -83,9 +83,10 @@ class NativeMeshClient private constructor(
             check(binder.transact(code, data, reply, 0)) { "ET_IPC_FAILED" }
             reply.readException()
             return output?.invoke(reply)
-        } catch (_: Exception) {
-            onEngineLost()
-            throw IllegalStateException("ET_ENGINE_COMMAND_FAILED")
+        } catch (error: Exception) {
+            val code = NativeMeshProtocol.safeError(error)
+            onEngineLost(code)
+            throw IllegalStateException(code)
         } finally { data.recycle(); reply.recycle() }
     }
 
@@ -101,7 +102,7 @@ class NativeMeshClient private constructor(
     }
 
     companion object {
-        suspend fun bind(context: Context, onEngineLost: () -> Unit): NativeMeshClient {
+        suspend fun bind(context: Context, onEngineLost: (String) -> Unit): NativeMeshClient {
             val client = NativeMeshClient(context.applicationContext, onEngineLost)
             try {
                 check(client.context.bindService(Intent(client.context, NativeMeshService::class.java), client.connection, Context.BIND_AUTO_CREATE)) { "ET_BIND_FAILED" }
