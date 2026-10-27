@@ -35,9 +35,18 @@ def main():
         call("install", "-r", str(tests[0]))
         call("shell", "appops", "set", PACKAGE, "ACTIVATE_VPN", "allow")
         call("shell", "am", "start", "-W", "-n", PACKAGE + "/com.github.kr328.clash.MainActivity")
-        output = call("shell", "am", "instrument", "-w", "-r", "-e", "disposableEmulator", "true",
-                      "-e", "class", "com.github.kr328.clash.NativeMeshSmokeTest",
-                      PACKAGE + ".test/androidx.test.runner.AndroidJUnitRunner", timeout=360)
+        try:
+            output = call("shell", "am", "instrument", "-w", "-r", "-e", "disposableEmulator", "true",
+                          "-e", "class", "com.github.kr328.clash.NativeMeshSmokeTest",
+                          PACKAGE + ".test/androidx.test.runner.AndroidJUnitRunner", timeout=360)
+        except subprocess.TimeoutExpired as error:
+            partial = error.stdout or b""
+            if isinstance(partial, bytes):
+                partial = partial.decode("utf-8", errors="replace")
+            (report / "instrumentation.txt").write_text(partial, encoding="utf-8")
+            print(partial[-12000:], flush=True)
+            result["timed_out"] = True
+            raise RuntimeError("Disposable lifecycle instrumentation timed out") from None
         (report / "instrumentation.txt").write_text(output, encoding="utf-8")
         if not re.search(r"OK \(1 test\)", output) or "FAILURES!!!" in output:
             # This fixture contains no user configuration. Surface the bounded

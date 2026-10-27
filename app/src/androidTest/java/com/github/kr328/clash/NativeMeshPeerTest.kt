@@ -59,10 +59,16 @@ class NativeMeshPeerTest {
             """.trimIndent())
             withTimeout(30_000) { withProfile { commit(created); setActive(queryByUUID(created)!!) } }
             File(folder, "status.json").delete()
+            File(folder, "peer-ready").delete()
+            File(folder, "peer-result.json").delete()
             File(folder, "enable").writeText("packet-path-only")
             context.startForegroundService(Intent(context, TunService::class.java))
             withTimeout(45_000) {
-                while (stage() != "active") { check(!stage().startsWith("ET_")); delay(100) }
+                while (stage() != "active") {
+                    val current = stage()
+                    check(!current.startsWith("ET_")) { current }
+                    delay(100)
+                }
             }
             File(folder, "peer-ready").writeText("ready")
             withTimeout(180_000) {

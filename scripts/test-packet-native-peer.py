@@ -96,7 +96,7 @@ def main():
     result = {"kind": "disposable-emulator-real-native-peer", "passed": False,
               "real_device_validated": False, "complete_integration": False,
               "dns_fakeip_validated": False, "discovery_validated": False, "checks": {}}
-    peer = instrument = None
+    peer = instrument = instrumentation = None
     helpers = []
     with tempfile.TemporaryDirectory(prefix="cmfa-native-peer-") as temp, ExitStack() as stack:
         temp = Path(temp)
@@ -235,6 +235,7 @@ def main():
                         child.wait(timeout=5)
                     except subprocess.TimeoutExpired:
                         child.kill()
+                        child.wait(timeout=5)
             if peer is not None and peer.poll() is None:
                 subprocess.run(["sudo", "kill", "-TERM", "--", "-" + str(peer.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 try:
@@ -242,6 +243,16 @@ def main():
                 except subprocess.TimeoutExpired:
                     subprocess.run(["sudo", "kill", "-KILL", "--", "-" + str(peer.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     peer.wait(timeout=5)
+            if instrumentation is not None:
+                instrumentation.flush()
+                if not result["passed"]:
+                    print((report / "instrumentation.txt").read_text()[-12000:], flush=True)
+            # Only this disposable emulator is queried. Never include the
+            # Linux peer's raw TOML/private log in an uploaded artifact.
+            try:
+                (report / "logcat.txt").write_text(call("logcat", "-d", "-t", "2000"))
+            except (OSError, subprocess.SubprocessError):
+                result["logcat_unavailable"] = True
             (report / "result.json").write_text(json.dumps(result, indent=2) + "\n")
             call("shell", "am", "force-stop", PACKAGE)
             call("shell", "rm", "-f", "/data/local/tmp/cmfa-mesh-probe")

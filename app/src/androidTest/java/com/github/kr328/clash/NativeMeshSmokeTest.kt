@@ -87,9 +87,12 @@ class NativeMeshSmokeTest {
                     val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
                     val child = am.runningAppProcesses.single { process -> process.processName == "${context.packageName}:native_mesh" }
                     assertEquals(context.applicationInfo.uid, child.uid)
-                    InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand("run-as ${context.packageName} kill -9 ${child.pid}").use { fd ->
-                        android.os.ParcelFileDescriptor.AutoCloseInputStream(fd).use { stream -> stream.readBytes() }
-                    }
+                    assertNotEquals(android.os.Process.myPid(), child.pid)
+                    // run-as has a different SELinux domain and cannot signal
+                    // an untrusted_app process on API 30. The instrumentation
+                    // runs with this app's UID/domain and kills only its named
+                    // native child, leaving the VPN owner intact.
+                    android.os.Process.killProcess(child.pid)
                     withTimeout(15_000) { while (!readStage().optString("stage").startsWith("ET_")) delay(100) }
                     delay(1_500)
                     assertTrue("Native death must not remove the VPN owner", ownsMeshAddress())
