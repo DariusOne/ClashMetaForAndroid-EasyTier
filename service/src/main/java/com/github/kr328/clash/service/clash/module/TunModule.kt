@@ -5,6 +5,8 @@ import android.net.VpnService
 import android.os.Build
 import androidx.core.content.getSystemService
 import com.github.kr328.clash.core.Clash
+import com.github.kr328.clash.core.bridge.TunInterface
+import com.github.kr328.clash.core.easytier.NativePacketRouter
 import com.github.kr328.clash.core.util.parseInetSocketAddress
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
@@ -64,6 +66,14 @@ class TunModule(private val vpn: VpnService) : Module<Unit>(vpn) {
             markSocket = vpn::protect,
             querySocketUid = this::queryUid
         )
+    }
+
+    fun attachPacket(fd: Int, meshFd: Int, configuration: String) {
+        check(NativePacketRouter.start(fd, meshFd, configuration, object : TunInterface {
+            override fun markSocket(fd: Int) { vpn.protect(fd) }
+            override fun querySocketUid(protocol: Int, source: String, target: String): Int =
+                queryUid(protocol, parseInetSocketAddress(source), parseInetSocketAddress(target))
+        })) { "ET_PACKET_START_FAILED" }
     }
 
     suspend fun close() {

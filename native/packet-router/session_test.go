@@ -82,3 +82,17 @@ func TestOverlapChoiceCannotCrossNetworkOrProfile(t *testing.T) {
 		t.Fatal("old decision reused")
 	}
 }
+
+func TestAdvertisedFamilyWithoutPhoneAddressStaysClosed(t *testing.T) {
+	p, _ := NewPolicy(Config{Mode: Combined, Session: 1, Profile: "fixture", Network: "wifi"})
+	s := NativeSnapshot{Schema: 1, Generation: 1, Running: true, Attached: true, Addresses: []string{"10.77.0.2/24"}, Routes: []string{"fd77::/64"}}
+	if err := p.ApplyNativeSnapshot(s, []netip.Prefix{netip.MustParsePrefix(s.Addresses[0])}); err != nil {
+		t.Fatal(err)
+	}
+	if p.Decide(netip.MustParseAddr("fd77::9")) != Drop {
+		t.Fatal("unowned IPv6 source admitted")
+	}
+	if p.Decide(netip.MustParseAddr("fd78::9")) != Clash {
+		t.Fatal("other IPv6 LAN changed")
+	}
+}

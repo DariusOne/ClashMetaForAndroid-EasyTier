@@ -50,9 +50,11 @@ func (t *remoteTun) querySocketUid(protocol int, source, target string) int {
 
 func (t *remoteTun) close() {
 	_ = t.limit.Acquire(context.TODO(), 4)
-	defer t.limit.Release(4)
-
 	t.closed = true
+	// Drain callbacks before deleting their JNI global reference, but do not
+	// keep all permits while joining the engine. Engine shutdown may query a
+	// socket owner; it must be able to observe closed and return immediately.
+	t.limit.Release(4)
 
 	if t.closer != nil {
 		_ = t.closer.Close()

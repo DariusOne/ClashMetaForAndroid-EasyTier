@@ -13,6 +13,7 @@ import com.github.kr328.clash.service.clash.clashRuntime
 import com.github.kr328.clash.service.clash.module.*
 import com.github.kr328.clash.service.model.AccessControlMode
 import com.github.kr328.clash.service.store.ServiceStore
+import com.github.kr328.clash.service.easytier.PacketHarness
 import com.github.kr328.clash.service.util.cancelAndJoinBlocking
 import com.github.kr328.clash.service.util.parseCIDR
 import com.github.kr328.clash.service.util.sendClashStarted
@@ -25,6 +26,7 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
         get() = this
 
     private var reason: String? = null
+    private var meshHarness: PacketHarness? = null
 
     private val runtime = clashRuntime {
         val store = ServiceStore(self)
@@ -73,7 +75,8 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
             reason = e.message
         } finally {
             withContext(NonCancellable) {
-                tun.close()
+                try { meshHarness?.close() } finally { tun.close() }
+                meshHarness = null
 
                 stopSelf()
             }
@@ -120,11 +123,26 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
         runtime.requestGc()
     }
 
-    private fun TunModule.open() {
+    private suspend fun TunModule.open() {
         val store = ServiceStore(self)
+        val harness = PacketHarness.configured(self, self)
+        meshHarness = harness
+        if (harness != null) {
+            check(!store.systemProxy) { "ET_PACKET_HARNESS_NO_HTTP_PROXY" }
+            harness.open(this, allowRouteGrowth = !store.bypassPrivateNetwork) { addresses, routes ->
+                buildDevice(store, addresses, routes, true)
+            }
+        } else {
+            attach(buildDevice(store, emptyList(), emptySet(), false))
+        }
+    }
 
-        val device = with(Builder()) {
+    private fun TunModule.buildDevice(store: ServiceStore, meshAddresses: List<PacketHarness.Address>, meshRoutes: Set<String>, nativeMesh: Boolean): TunModule.TunDevice {
+        return with(Builder()) {
             // Interface address
+            // The mesh address is first so native packets use the phone's mesh
+            // identity; source selection remains a required real-device test.
+            meshAddresses.forEach { addAddress(it.ip, it.bits) }
             addAddress(TUN_GATEWAY, TUN_SUBNET_PREFIX)
             if (store.allowIpv6) {
                 addAddress(TUN_GATEWAY6, TUN_SUBNET_PREFIX6)
@@ -153,16 +171,33 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
                 }
             }
 
+            if (nativeMesh) {
+                meshRoutes.map(::parseCIDR).forEach { addRoute(it.ip, it.prefix) }
+                addRoute("255.255.255.255", 32)
+                addRoute("224.0.0.251", 32)
+                addRoute("239.255.255.250", 32)
+                if (meshAddresses.any { it.ip.contains(":") }) {
+                    addRoute("ff02::fb", 128)
+                    addRoute("ff02::c", 128)
+                }
+            }
+
             // Access Control
             when (store.accessControlMode) {
-                AccessControlMode.AcceptAll -> Unit
+                AccessControlMode.AcceptAll -> if (nativeMesh) addDisallowedApplication(packageName) else Unit
                 AccessControlMode.AcceptSelected -> {
-                    (store.accessControlPackages + packageName).forEach {
-                        runCatching { addAllowedApplication(it) }
+                    val packages = if (nativeMesh) store.accessControlPackages - packageName else store.accessControlPackages + packageName
+                    var added = 0
+                    packages.forEach {
+                        runCatching { addAllowedApplication(it) }.onSuccess { added++ }
                     }
+                    if (nativeMesh) check(added > 0) { "ET_EMPTY_ALLOWED_APPLICATIONS" }
                 }
                 AccessControlMode.DenySelected -> {
-                    (store.accessControlPackages - packageName).forEach {
+                    val packages = if (nativeMesh) store.accessControlPackages + packageName else store.accessControlPackages - packageName
+                    packages.forEach {
+                        if (nativeMesh && it == packageName) addDisallowedApplication(it)
+                        else
                         runCatching { addDisallowedApplication(it) }
                     }
                 }
@@ -172,10 +207,10 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
             setBlocking(false)
 
             // Mtu
-            setMtu(TUN_MTU)
+            setMtu(if (nativeMesh) 1380 else TUN_MTU)
 
             // Session Name
-            setSession("Clash")
+            setSession(if (nativeMesh) "CMFA + EasyTier packet prototype" else "Clash")
 
             // Virtual Dns Server
             addDnsServer(TUN_DNS)
@@ -225,7 +260,6 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
             )
         }
 
-        attach(device)
     }
 
     companion object {

@@ -45,9 +45,12 @@ subprojects {
     extensions.configure<BaseExtension> {
         buildFeatures.buildConfig = true
         defaultConfig {
+            val nativeMeshHarness = providers.gradleProperty("nativeMeshHarness").orNull == "true"
+            buildConfigField("boolean", "NATIVE_MESH_HARNESS", nativeMeshHarness.toString())
             if (isApp) {
                 val customApplicationId = queryConfigProperty("custom.application.id") as? String?
                 applicationId = customApplicationId.takeIf { it?.isNotBlank() == true } ?: "com.github.metacubex.clash"
+                if (nativeMeshHarness) applicationId = applicationId + ".meshprototype"
             }
 
             project.name.let { name ->
@@ -65,12 +68,12 @@ subprojects {
             resValue("integer", "release_code", "$versionCode")
 
             ndk {
-                abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+                abiFilters += if (nativeMeshHarness) listOf("arm64-v8a", "x86_64") else listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
             }
 
             externalNativeBuild {
                 cmake {
-                    abiFilters("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+                    if (nativeMeshHarness) abiFilters("arm64-v8a", "x86_64") else abiFilters("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
                 }
             }
 
@@ -132,6 +135,12 @@ subprojects {
                     applicationIdSuffix = ".meta"
                 }
             }
+            if (providers.gradleProperty("nativeMeshHarness").orNull == "true") {
+                all {
+                    resValue("string", "launch_name", "CMFA + EasyTier Prototype")
+                    resValue("string", "application_name", "CMFA + EasyTier Prototype")
+                }
+            }
         }
 
         sourceSets {
@@ -188,7 +197,8 @@ subprojects {
                     isEnable = true
                     isUniversalApk = true
                     reset()
-                    include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+                    if (providers.gradleProperty("nativeMeshHarness").orNull == "true") include("arm64-v8a", "x86_64")
+                    else include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
                 }
             }
         }

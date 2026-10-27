@@ -29,6 +29,9 @@ golang {
 }
 
 android {
+    if (providers.gradleProperty("nativeMeshHarness").orNull == "true") {
+        sourceSets.getByName("main").jniLibs.srcDir(layout.buildDirectory.dir("native-jni"))
+    }
     productFlavors {
         all {
             externalNativeBuild {
@@ -59,6 +62,22 @@ dependencies {
 afterEvaluate {
     tasks.withType(GolangBuildTask::class.java).forEach {
         it.inputs.dir(golangSource)
+        it.inputs.dir(rootProject.file("native/packet-router"))
+    }
+    if (providers.gradleProperty("nativeMeshHarness").orNull == "true") {
+        val verify = tasks.register("verifyNativeMeshLibraries") {
+            doLast {
+                for (abi in listOf("arm64-v8a", "x86_64")) {
+                    val dir = layout.buildDirectory.dir("native-jni/$abi").get().asFile
+                    val library = dir.resolve("libcmfa_easytier.so")
+                    val stamp = dir.resolve("build-info.json")
+                    check(library.isFile && stamp.isFile) { "Build both pinned native mesh ABIs before the prototype APK" }
+                    val hash = java.security.MessageDigest.getInstance("SHA-256").digest(library.readBytes()).joinToString("") { "%02x".format(it) }
+                    check(stamp.readText().contains(hash)) { "Native mesh artifact checksum mismatch" }
+                }
+            }
+        }
+        tasks.named("preBuild").configure { dependsOn(verify) }
     }
 }
 

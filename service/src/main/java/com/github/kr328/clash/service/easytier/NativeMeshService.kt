@@ -10,6 +10,8 @@ import android.os.Process
 import com.github.kr328.clash.core.easytier.NativeEasyTier
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /** Bound, unexported engine process. It owns NO VpnService or Android TUN.
  * The caller must exclude this application's UID in the active VPN before start.
@@ -20,6 +22,7 @@ class NativeMeshService : Service() {
     private val lock = Any()
     private var generation = 0L
     private var owner: IBinder? = null
+    private val watchdog = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "mesh-command-watchdog").apply { isDaemon = true } }
     private val ownerDeath = IBinder.DeathRecipient { synchronized(lock) { stopLocked() } }
 
     private val endpoint = object : Binder() {
@@ -34,7 +37,8 @@ class NativeMeshService : Service() {
             }
             if (code !in NativeMeshProtocol.START..NativeMeshProtocol.STOP || reply == null) return false
             data.enforceInterface(NativeMeshProtocol.DESCRIPTOR)
-            synchronized(lock) {
+            val deadline = watchdog.schedule({ Process.killProcess(Process.myPid()) }, 15, TimeUnit.SECONDS)
+            try { synchronized(lock) {
                 // Always return fixed errors. Native TOML/URI parser exceptions
                 // may contain a network secret and must never reach logcat/IPC.
                 try {
@@ -91,7 +95,7 @@ class NativeMeshService : Service() {
                 } catch (_: Throwable) {
                     reply.writeException(IllegalStateException("ET_ENGINE_COMMAND_FAILED"))
                 }
-            }
+            } } finally { deadline.cancel(false) }
             return true
         }
     }
@@ -103,11 +107,15 @@ class NativeMeshService : Service() {
         generation = 0
         owner?.let { runCatching { it.unlinkToDeath(ownerDeath, 0) } }
         owner = null
-        if (current != 0L) runCatching { NativeEasyTier.stop(current) }
+        if (current != 0L) {
+            val deadline = watchdog.schedule({ Process.killProcess(Process.myPid()) }, 5, TimeUnit.SECONDS)
+            try { runCatching { NativeEasyTier.stop(current) } } finally { deadline.cancel(false) }
+        }
     }
 
     override fun onDestroy() {
         synchronized(lock) { stopLocked() }
+        watchdog.shutdown()
         super.onDestroy()
     }
 }

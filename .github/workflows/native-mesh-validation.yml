@@ -28,7 +28,7 @@ jobs:
           native = True
           if os.environ['EVENT_NAME'] == 'push' and re.fullmatch(r'[0-9a-f]{40}', base) and base != '0' * 40:
               paths = subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines()
-              native = any(p.startswith(('native/easytier-bridge/','native/easytier-upstream')) or p in ('.gitmodules','scripts/build-easytier-android.py') for p in paths)
+              native = any(p.startswith(('native/easytier-bridge/','native/easytier-upstream','service/src/main/java/com/github/kr328/clash/service/easytier/')) or p in ('.gitmodules','scripts/build-easytier-android.py','build.gradle.kts','core/build.gradle.kts','service/src/main/java/com/github/kr328/clash/service/TunService.kt','.github/workflows/native-mesh-validation.yml') for p in paths)
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('native=' + str(native).lower() + '\n')
           PY
@@ -117,3 +117,41 @@ jobs:
         env:
           CARGO_BUILD_JOBS: '2'
         run: cargo +1.95.0 test --locked --manifest-path native/easytier-bridge/Cargo.toml --lib
+  packet-prototype-apk:
+    needs: [native-engine, native-host-tests, packet-router, mihomo-packet-adapter]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          submodules: recursive
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: native-prototype-arm64-v8a
+          path: core/build/native-jni/arm64-v8a
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: native-prototype-x86_64
+          path: core/build/native-jni/x86_64
+      - name: Set up pinned compiler and Java 21
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_21_X64/bin" >> "$GITHUB_PATH"
+          curl --fail --location --output "$RUNNER_TEMP/go.tar.gz" https://github.com/MetaCubeX/go/releases/download/build/go1.26.linux-amd64.tar.gz
+          echo "c1278af2579c9398cf22c638686e5348926b160eda784930d416d95aaa7a9221  $RUNNER_TEMP/go.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/go.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/go/bin" >> "$GITHUB_PATH"
+          cd "$RUNNER_TEMP/go"
+          for p in "$GITHUB_WORKSPACE"/.github/patch/*.patch; do patch -p 1 < "$p"; done
+      - name: Compile opt-in packet prototype with a separate application ID
+        run: ./gradlew --no-daemon -PnativeMeshHarness=true app:assembleMetaDebug
+      - name: Verify separate identity and both native libraries in APK
+        run: python3 scripts/verify-packet-prototype.py app/build/outputs/apk/meta/debug
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: packet-path-prototype-NOT-device-validated
+          path: |
+            app/build/outputs/apk/meta/debug/*universal*.apk
+            app/build/outputs/apk/meta/debug/prototype-verification.json
+          if-no-files-found: error
+          retention-days: 14

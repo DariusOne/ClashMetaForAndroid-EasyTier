@@ -1,8 +1,10 @@
 # Native EasyTier integration — implementation gate
 
-This branch is an **unfinished packet-path prototype**, not an installable combined
-VPN. The existing CMFA service has not been switched to it. Do not label a normal
-CMFA build from this branch as an EasyTier-integrated APK.
+This branch is an **unfinished packet-path prototype**, not a completed combined
+VPN. Normal builds retain the original service behavior. An explicit development
+build and private opt-in marker connect a raw-packet acceptance harness to the
+existing VPN owner; see [prototype instructions](PACKET-PROTOTYPE.md). Neither a
+normal CMFA build nor that development APK is a completed integration.
 
 ## Locked sources
 
@@ -41,7 +43,9 @@ is available in `native/easytier-upstream/easytier/LICENSE`.
 - A JNI packet-session entry point and a private bound Android engine service in
   its own process. Binder death notifies the owner to close mesh ownership;
   profile contents travel through an FD, not an Intent or log. These entry points
-  remain dormant until the VPN coordinator and transport isolation are connected.
+  are used only by the explicit packet acceptance harness. Native startup follows
+  VPN establishment with its own UID excluded; runtime protection still needs
+  Android packet-level verification.
 - Versioned, credential-free native snapshots. DHCP addresses, published routes,
   readiness and route withdrawal are committed together. A new phone address is
   unusable until the owner acknowledges it is installed on the Android interface.
@@ -55,12 +59,12 @@ is available in `native/easytier-upstream/easytier/LICENSE`.
 
 ## Mandatory remaining packet-path work
 
-1. Connect the existing Android VPN owner to the engine service and packet-session
-   entry point. Integrate outer-socket protection. A Boolean argument
-   in the JNI adapter is a host precondition, **not evidence of actual protection**.
+1. Verify the opt-in VPN coordinator and native UID exclusion on Android. A Boolean
+   argument in JNI alone is **not evidence of actual protection**.
    Audit all native TCP/UDP/STUN/QUIC/DNS sockets before enabling combined mode.
-2. Connect the dispatcher to native EasyTier on Android, retain correct virtual
-   source addresses and MTU, handle DHCP/address/route changes transactionally.
+2. Validate virtual source selection and MTU on Android. Implement interface
+   rebuild/network-switch recovery; the harness currently closes mesh traffic
+   when those changes require a new Android interface.
 3. Route HTTP/SOCKS and post-Fake-IP/resolution flows through the same ownership
    policy. A raw destination classifier alone does not cover these flows.
 4. Confirm generic bidirectional TCP/UDP/ICMP, fragmentation and supported

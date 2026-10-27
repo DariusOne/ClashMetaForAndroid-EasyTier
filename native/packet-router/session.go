@@ -100,9 +100,21 @@ func (p *Policy) ApplyNativeSnapshot(s NativeSnapshot, installedAddresses []neti
 	if err != nil {
 		return err
 	}
+	// A peer may advertise IPv6 while this phone owns only IPv4 (or vice
+	// versa). Keep that ownership closed rather than emitting a packet using
+	// the unrelated Mihomo gateway as the mesh source address.
+	usable := make([]netip.Prefix, 0, len(active))
+	for _, route := range active {
+		for _, address := range addresses {
+			if address.Addr().Is4() == route.Addr().Is4() {
+				usable = append(usable, route)
+				break
+			}
+		}
+	}
 	next := *old
 	next.config.VirtualNetworks, next.config.DeviceAddresses = virtual, device
-	next.active, next.claimed = active, claimed
+	next.active, next.claimed = usable, claimed
 	next.ready = s.Running && s.Attached && installed
 	p.v.Store(&next)
 	return nil

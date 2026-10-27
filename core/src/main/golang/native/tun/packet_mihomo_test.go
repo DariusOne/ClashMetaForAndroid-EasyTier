@@ -42,6 +42,12 @@ func (e *echoTunnel) NatTable() C.NatTable { return &e.nat }
 // Real gVisor TCP/UDP -> datagram adapter -> Mihomo inbound -> response. The
 // delegate is an in-process echo, so this is NOT Android or real-peer acceptance.
 func TestPacketMihomoTCPUDP(t *testing.T) {
+	for _, source := range [][4]byte{{172, 19, 0, 1}, {10, 77, 0, 2}} {
+		t.Run(netip.AddrFrom4(source).String(), func(t *testing.T) { packetMihomoTCPUDP(t, source) })
+	}
+}
+
+func packetMihomoTCPUDP(t *testing.T, source [4]byte) {
 	peer, fd, err := router.NewPacketPair()
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +69,7 @@ func TestPacketMihomoTCPUDP(t *testing.T) {
 	if err := s.CreateNIC(1, endpoint); err != nil {
 		t.Fatal(err)
 	}
-	a := tcpip.AddrFrom4([4]byte{172, 19, 0, 1})
+	a := tcpip.AddrFrom4(source)
 	if err := s.AddProtocolAddress(1, tcpip.ProtocolAddress{Protocol: ipv4.ProtocolNumber, AddressWithPrefix: tcpip.AddressWithPrefix{Address: a, PrefixLen: 30}}, stack.AddressProperties{}); err != nil {
 		t.Fatal(err)
 	}
