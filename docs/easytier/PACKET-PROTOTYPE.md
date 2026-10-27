@@ -18,9 +18,14 @@ CI also contains an Android API 30 x86_64 emulator lifecycle test: a newly
 created local-only profile starts and stops the single VPN ten times, checks
 native startup and Android mesh address installation/removal, kills only the
 disposable native child on the last cycle to check VPN-owner survival, and saves its
-result separately. It has no real mesh peer and does not establish peer traffic,
-DNS/Fake-IP correctness, phone compatibility or discovery support. Never run
-this disposable-data test on a phone containing user configuration.
+result separately. A subsequent CI fixture starts a checksum-pinned, disposable
+Linux EasyTier peer and probes TCP/UDP/ICMP in both directions. The Android
+probe runs under shell UID (captured by the VPN), not the VPN application's
+excluded UID. It also checks nonmesh TCP/UDP and an original Mihomo REJECT rule.
+These are executable tests, not a claim that they have passed: inspect the run's
+separate lifecycle and peer result JSON files. DNS/Fake-IP, phone compatibility
+and discovery still require their acceptance rows. Never run these disposable
+data tests on a phone containing user configuration.
 
 After installing that debug APK on an explicitly approved test device, import a
 disposable Clash YAML through its existing UI. Keep its system HTTP proxy off.
