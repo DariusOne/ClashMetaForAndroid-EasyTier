@@ -35,7 +35,7 @@ func (e *echoTunnel) HandleTCPConn(c net.Conn, m *C.Metadata) {
 func (e *echoTunnel) HandleUDPPacket(p C.UDPPacket, m *C.Metadata) {
 	defer p.Drop()
 	e.seen <- m
-	_, _ = p.WriteBack(p.Data(), nil)
+	_, _ = p.WriteBack(p.Data(), net.UDPAddrFromAddrPort(netip.AddrPortFrom(m.DstIP, m.DstPort)))
 }
 func (e *echoTunnel) NatTable() C.NatTable { return &e.nat }
 
