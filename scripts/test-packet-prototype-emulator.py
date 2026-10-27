@@ -40,6 +40,10 @@ def main():
                       PACKAGE + ".test/androidx.test.runner.AndroidJUnitRunner", timeout=360)
         (report / "instrumentation.txt").write_text(output, encoding="utf-8")
         if not re.search(r"OK \(1 test\)", output) or "FAILURES!!!" in output:
+            # This fixture contains no user configuration. Surface the bounded
+            # assertion/stack trace so lifecycle failures can be diagnosed
+            # without exposing general logcat or private profile contents.
+            print(output[-12000:], flush=True)
             raise RuntimeError("Android lifecycle smoke test failed; inspect instrumentation report")
         result["passed"] = True
     finally:

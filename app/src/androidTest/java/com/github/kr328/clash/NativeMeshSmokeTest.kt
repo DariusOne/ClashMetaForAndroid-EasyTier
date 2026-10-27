@@ -63,7 +63,9 @@ class NativeMeshSmokeTest {
                 mode: rule
                 log-level: silent
                 ipv6: false
-                proxies: []
+                proxies:
+                  - name: disposable-direct
+                    type: direct
                 proxy-groups: []
                 rules:
                   - MATCH,DIRECT

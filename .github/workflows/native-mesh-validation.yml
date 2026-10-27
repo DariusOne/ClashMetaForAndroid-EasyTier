@@ -28,7 +28,7 @@ jobs:
           native = True
           if os.environ['EVENT_NAME'] == 'push' and re.fullmatch(r'[0-9a-f]{40}', base) and base != '0' * 40:
               paths = subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines()
-              native = any(p.startswith(('native/easytier-bridge/','native/easytier-upstream','service/src/main/java/com/github/kr328/clash/service/easytier/')) or p in ('.gitmodules','scripts/build-easytier-android.py','build.gradle.kts','core/build.gradle.kts','service/src/main/java/com/github/kr328/clash/service/TunService.kt','.github/workflows/native-mesh-validation.yml') for p in paths)
+              native = any(p.startswith(('native/easytier-bridge/','native/easytier-upstream','service/src/main/java/com/github/kr328/clash/service/easytier/','app/src/androidTest/')) or p in ('.gitmodules','scripts/build-easytier-android.py','scripts/test-packet-prototype-emulator.py','build.gradle.kts','core/build.gradle.kts','service/src/main/java/com/github/kr328/clash/service/TunService.kt','.github/workflows/native-mesh-validation.yml') for p in paths)
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('native=' + str(native).lower() + '\n')
           PY
