@@ -1,6 +1,7 @@
 import android.databinding.tool.ext.capitalizeUS
 import com.github.kr328.golang.GolangBuildTask
 import com.github.kr328.golang.GolangPlugin
+import java.security.MessageDigest
 
 plugins {
     kotlin("android")
@@ -72,7 +73,7 @@ afterEvaluate {
                     val library = dir.resolve("libcmfa_easytier.so")
                     val stamp = dir.resolve("build-info.json")
                     check(library.isFile && stamp.isFile) { "Build both pinned native mesh ABIs before the prototype APK" }
-                    val hash = java.security.MessageDigest.getInstance("SHA-256").digest(library.readBytes()).joinToString("") { "%02x".format(it) }
+                    val hash = MessageDigest.getInstance("SHA-256").digest(library.readBytes()).joinToString("") { "%02x".format(it) }
                     check(stamp.readText().contains(hash)) { "Native mesh artifact checksum mismatch" }
                 }
             }
@@ -95,3 +96,4 @@ androidComponents.onVariants { variant ->
         }
     }
 }
+
