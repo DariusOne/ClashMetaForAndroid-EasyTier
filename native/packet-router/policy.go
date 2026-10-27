@@ -145,8 +145,11 @@ func (p *Policy) ReplaceRoutes(session uint64, routes []netip.Prefix) error {
 			return ErrInvalidPolicy
 		}
 	}
-	active, _ := prefixes(append(append([]netip.Prefix(nil), old.config.VirtualNetworks...), routes...), true)
-	claimed, err := prefixes(append(append([]netip.Prefix(nil), old.claimed...), active...), true)
+	active, err := mergePrefixes(old.config.VirtualNetworks, routes)
+	if err != nil {
+		return err
+	}
+	claimed, err := mergePrefixes(old.claimed, active)
 	if err != nil {
 		return err
 	}
@@ -323,4 +326,23 @@ func prefixes(rs []netip.Prefix, managed bool) ([]netip.Prefix, error) {
 		return result[i].Addr().Less(result[j].Addr())
 	})
 	return result, nil
+}
+
+// The bound applies to unique owned routes. A repeat of the same large route
+// snapshot must not fail simply because the old and new lists share entries.
+func mergePrefixes(a, b []netip.Prefix) ([]netip.Prefix, error) {
+	seen := make(map[netip.Prefix]struct{}, len(a))
+	for _, list := range [][]netip.Prefix{a, b} {
+		for _, p := range list {
+			seen[p] = struct{}{}
+			if len(seen) > 4096 {
+				return nil, ErrInvalidPolicy
+			}
+		}
+	}
+	result := make([]netip.Prefix, 0, len(seen))
+	for p := range seen {
+		result = append(result, p)
+	}
+	return prefixes(result, true)
 }

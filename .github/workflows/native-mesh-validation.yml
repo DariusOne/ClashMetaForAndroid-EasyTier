@@ -9,6 +9,29 @@ concurrency:
   group: native-mesh-${{ github.ref }}
   cancel-in-progress: false
 jobs:
+  changed-components:
+    runs-on: ubuntu-latest
+    outputs:
+      native: ${{ steps.paths.outputs.native }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+      - id: paths
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          python3 - <<'PY'
+          import os, re, subprocess
+          base = os.environ.get('BEFORE_SHA', '')
+          native = True
+          if os.environ['EVENT_NAME'] == 'push' and re.fullmatch(r'[0-9a-f]{40}', base) and base != '0' * 40:
+              paths = subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines()
+              native = any(p.startswith(('native/easytier-bridge/','native/easytier-upstream')) or p in ('.gitmodules','scripts/build-easytier-android.py') for p in paths)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('native=' + str(native).lower() + '\n')
+          PY
   packet-router:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -48,6 +71,8 @@ jobs:
           CGO_ENABLED: '1'
         run: go test -mod=readonly -race -tags 'with_gvisor,cmfa' -count=1 -timeout 90s ./native/tun
   native-engine:
+    needs: changed-components
+    if: needs.changed-components.outputs.native == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -75,6 +100,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   native-host-tests:
+    needs: changed-components
+    if: needs.changed-components.outputs.native == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

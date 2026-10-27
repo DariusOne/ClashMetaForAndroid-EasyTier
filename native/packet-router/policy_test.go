@@ -22,6 +22,29 @@ func readyPolicy(t *testing.T) *Policy {
 	return p
 }
 
+func TestRepeatedLargeSnapshotAndAtomicRouteLimit(t *testing.T) {
+	p := readyPolicy(t)
+	routes := make([]netip.Prefix, 4095)
+	for i := range routes {
+		routes[i] = netip.PrefixFrom(netip.AddrFrom4([4]byte{10, 120, byte(i >> 8), byte(i)}), 32)
+	}
+	for i := 0; i < 3; i++ {
+		if err := p.ReplaceRoutes(1, routes); err != nil {
+			t.Fatal("identical snapshot rejected", err)
+		}
+	}
+	if p.Decide(routes[4094].Addr()) != EasyTier {
+		t.Fatal("large snapshot not installed")
+	}
+	tooMany := append(append([]netip.Prefix(nil), routes...), pfx("10.121.0.1/32"))
+	if p.ReplaceRoutes(1, tooMany) != ErrInvalidPolicy {
+		t.Fatal("unique route limit ignored")
+	}
+	if p.Decide(routes[4094].Addr()) != EasyTier || p.Decide(addr("10.121.0.1")) != Clash {
+		t.Fatal("failed update changed current policy")
+	}
+}
+
 func TestOnlyManagedDestinations(t *testing.T) {
 	p := readyPolicy(t)
 	if err := p.ReplaceRoutes(1, []netip.Prefix{pfx("192.168.100.0/24"), pfx("fd42:1234::/64")}); err != nil {
