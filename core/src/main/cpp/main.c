@@ -135,6 +135,29 @@ Java_com_github_kr328_clash_core_bridge_Bridge_nativeStopTun(JNIEnv *env, jobjec
     stopTun();
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_github_kr328_clash_core_easytier_NativePacketRouter_start(JNIEnv *env, jobject thiz,
+                                                                jint fd, jint mesh_fd,
+                                                                jstring configuration, jobject cb) {
+    scoped_string config = get_string(configuration);
+    jobject callback = new_global(cb);
+    return startPacketTun(fd, mesh_fd, config, callback) == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_github_kr328_clash_core_easytier_NativePacketRouter_update(JNIEnv *env, jobject thiz,
+                                                                 jstring snapshot, jstring installed) {
+    scoped_string state = get_string(snapshot);
+    scoped_string addresses = get_string(installed);
+    return updatePacketMesh(state, addresses) == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_github_kr328_clash_core_easytier_NativePacketRouter_failClosed(JNIEnv *env, jobject thiz,
+                                                                     jlong generation) {
+    closePacketMesh(generation);
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_github_kr328_clash_core_bridge_Bridge_nativeStartHttp(JNIEnv *env, jobject thiz,
                                                                jstring listen_at) {

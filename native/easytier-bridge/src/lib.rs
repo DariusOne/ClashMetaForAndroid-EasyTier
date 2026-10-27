@@ -26,6 +26,7 @@ struct Session {
     id: uuid::Uuid,
     // Drop the engine (which joins its workers) BEFORE the borrowed packet fd.
     manager: NetworkInstanceManager,
+    configured_ipv6: Option<String>,
     #[cfg(unix)]
     packet: Option<OwnedFd>,
 }
@@ -171,6 +172,7 @@ pub extern "system" fn Java_com_github_kr328_clash_core_easytier_NativeEasyTier_
         if slot.is_some() {
             return Err("ET_ALREADY_RUNNING");
         }
+        let configured_ipv6 = cfg.get_ipv6().map(|ip| ip.to_string());
         let manager = NetworkInstanceManager::new();
         manager
             .run_network_instance(cfg, false, ConfigFileControl::STATIC_CONFIG)
@@ -179,6 +181,7 @@ pub extern "system" fn Java_com_github_kr328_clash_core_easytier_NativeEasyTier_
             generation,
             id,
             manager,
+            configured_ipv6,
             #[cfg(unix)]
             packet: None,
         });
@@ -281,12 +284,40 @@ pub extern "system" fn Java_com_github_kr328_clash_core_easytier_NativeEasyTier_
             .map_err(|_| "ET_STATUS_UNAVAILABLE")?;
         let info = infos.get(&session.id).ok_or("ET_STATUS_UNAVAILABLE")?;
         // Deliberately omit raw config, events, public endpoints and network secret.
-        let routes: Vec<_> = info
-            .routes
-            .iter()
-            .map(|r| json!({"ipv4":r.ipv4_addr,"ipv6":r.ipv6_addr,"proxy_cidrs":r.proxy_cidrs}))
-            .collect();
-        Ok(json!({"generation":generation,"running":info.running && info.error_msg.is_none(),"ipv4":info.my_node_info.as_ref().and_then(|n|n.virtual_ipv4.as_ref()),"routes":routes}).to_string())
+        let mut addresses = Vec::new();
+        if let Some(ip) = info
+            .my_node_info
+            .as_ref()
+            .and_then(|n| n.virtual_ipv4.as_ref())
+        {
+            if ip.network_length == 0 || ip.network_length > 32 || ip.address.is_none() {
+                return Err("ET_STATUS_INVALID");
+            }
+            addresses.push(format!("{}/{}", ip.address.unwrap(), ip.network_length));
+        }
+        if let Some(ip) = &session.configured_ipv6 {
+            addresses.push(ip.clone());
+        }
+        let mut routes = std::collections::BTreeSet::new();
+        for route in &info.routes {
+            if let Some(ip) = route.ipv4_addr.as_ref().and_then(|ip| ip.address) {
+                routes.insert(format!("{ip}/32"));
+            }
+            if let Some(ip) = route.ipv6_addr.as_ref().and_then(|ip| ip.address) {
+                routes.insert(format!("{ip}/128"));
+            }
+            for prefix in &route.proxy_cidrs {
+                routes.insert(prefix.clone());
+            }
+            if routes.len() > 4096 {
+                return Err("ET_STATUS_TOO_LARGE");
+            }
+        }
+        #[cfg(unix)]
+        let attached = session.packet.is_some();
+        #[cfg(not(unix))]
+        let attached = false;
+        Ok(json!({"schema":1,"generation":generation,"running":info.running && info.error_msg.is_none(),"attached":attached,"addresses":addresses,"routes":routes}).to_string())
     })();
     match result {
         Ok(value) => match env.new_string(value) {

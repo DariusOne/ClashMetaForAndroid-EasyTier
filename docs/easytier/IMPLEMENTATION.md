@@ -38,6 +38,15 @@ is available in `native/easytier-upstream/easytier/LICENSE`.
 - A dormant CMFA Go lifecycle adapter and a gVisor packet endpoint reusing the
   real Mihomo inbound handler. The host TCP/UDP echo test exercises packet decode
   and return framing; its mock policy delegate does not prove Android routing.
+- A JNI packet-session entry point and a private bound Android engine service in
+  its own process. Binder death notifies the owner to close mesh ownership;
+  profile contents travel through an FD, not an Intent or log. These entry points
+  remain dormant until the VPN coordinator and transport isolation are connected.
+- Versioned, credential-free native snapshots. DHCP addresses, published routes,
+  readiness and route withdrawal are committed together. A new phone address is
+  unusable until the owner acknowledges it is installed on the Android interface.
+- Shared post-resolution ownership classification with mixed-answer rejection;
+  this is an API/tested decision, **not yet a wired Mihomo DNS/HTTP/SOCKS hook**.
 - Imported native flags are validated before upstream's infallible deserializer;
   invalid fields cannot intentionally abort the Java process. Host file sources,
   management portals, exit routes and phone gateway advertisements are rejected.
@@ -46,10 +55,11 @@ is available in `native/easytier-upstream/easytier/LICENSE`.
 
 ## Mandatory remaining packet-path work
 
-1. Integrate Android VPN lifecycle and outer-socket protection. A Boolean argument
+1. Connect the existing Android VPN owner to the engine service and packet-session
+   entry point. Integrate outer-socket protection. A Boolean argument
    in the JNI adapter is a host precondition, **not evidence of actual protection**.
    Audit all native TCP/UDP/STUN/QUIC/DNS sockets before enabling combined mode.
-2. Connect the dispatcher to Mihomo and native EasyTier, retain correct virtual
+2. Connect the dispatcher to native EasyTier on Android, retain correct virtual
    source addresses and MTU, handle DHCP/address/route changes transactionally.
 3. Route HTTP/SOCKS and post-Fake-IP/resolution flows through the same ownership
    policy. A raw destination classifier alone does not cover these flows.

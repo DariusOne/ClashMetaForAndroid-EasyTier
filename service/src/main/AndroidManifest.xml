@@ -11,6 +11,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application>
+        <!-- Native engine is crash-contained, never a second VPN service. -->
+        <service
+            android:name=".easytier.NativeMeshService"
+            android:exported="false"
+            android:process=":native_mesh" />
         <service
             android:name=".ClashService"
             android:exported="false"

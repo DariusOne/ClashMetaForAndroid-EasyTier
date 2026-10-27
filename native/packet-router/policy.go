@@ -194,7 +194,10 @@ func (p *Policy) NetworkChanged(session uint64, network string, locals []netip.P
 }
 
 func (p *Policy) Decide(addr netip.Addr) Destination {
-	v := p.v.Load()
+	return decide(p.v.Load(), addr)
+}
+
+func decide(v *view, addr netip.Addr) Destination {
 	if v == nil || !addr.IsValid() || addr.Zone() != "" {
 		return Drop
 	}

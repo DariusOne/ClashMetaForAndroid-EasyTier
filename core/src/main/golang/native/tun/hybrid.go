@@ -46,7 +46,7 @@ func StartHybrid(fd, clashFD, meshFD int, engine io.Closer, config router.Config
 			}
 		}
 	}
-	if engine == nil || fd < 0 || clashFD < 0 || meshFD < 0 || fd == meshFD || fd == clashFD || meshFD == clashFD || config.Mode != router.Combined {
+	if engine == nil || fd < 0 || clashFD < 0 || meshFD < 0 || fd == meshFD || fd == clashFD || meshFD == clashFD || (config.Mode != router.Combined && config.Mode != router.MeshOnly) {
 		closeInputs()
 		return nil, ErrHybridStart
 	}
@@ -87,6 +87,12 @@ func (h *Hybrid) ReplaceRoutes(session uint64, routes []netip.Prefix) error {
 	return h.policy.ReplaceRoutes(session, routes)
 }
 func (h *Hybrid) SetReady(session uint64, ready bool) error { return h.policy.SetReady(session, ready) }
+func (h *Hybrid) ApplySnapshot(snapshot router.NativeSnapshot, installed []netip.Prefix) error {
+	return h.policy.ApplyNativeSnapshot(snapshot, installed)
+}
+func (h *Hybrid) SetConflicts(session uint64, profile, network string, choices []router.Conflict) error {
+	return h.policy.SetConflicts(session, profile, network, choices)
+}
 func (h *Hybrid) NetworkChanged(session uint64, network string, locals []netip.Prefix) error {
 	return h.policy.NetworkChanged(session, network, locals)
 }
