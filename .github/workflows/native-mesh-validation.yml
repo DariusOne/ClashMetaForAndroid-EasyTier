@@ -7,7 +7,7 @@ permissions:
   contents: read
 concurrency:
   group: native-mesh-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   packet-router:
     runs-on: ubuntu-latest
@@ -29,6 +29,24 @@ jobs:
           go test -run '^$' -fuzz FuzzDestinationIP -fuzztime 15s
           GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build ./...
           GOOS=android GOARCH=amd64 CGO_ENABLED=0 go build ./...
+  mihomo-packet-adapter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          submodules: true
+      - name: Install checksum-pinned CMFA Go toolchain
+        run: |
+          curl --fail --location --output "$RUNNER_TEMP/go.tar.gz" https://github.com/MetaCubeX/go/releases/download/build/go1.26.linux-amd64.tar.gz
+          echo "c1278af2579c9398cf22c638686e5348926b160eda784930d416d95aaa7a9221  $RUNNER_TEMP/go.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/go.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/go/bin" >> "$GITHUB_PATH"
+      - name: Real TCP and UDP through the Mihomo packet adapter
+        working-directory: core/src/main/golang
+        env:
+          CGO_ENABLED: '1'
+        run: go test -mod=readonly -race -tags 'with_gvisor,cmfa' -count=1 -timeout 90s ./native/tun
   native-engine:
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -47,11 +65,6 @@ jobs:
           rustup toolchain install 1.95.0 --profile minimal
           rustup target add --toolchain 1.95.0 aarch64-linux-android x86_64-linux-android
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'ndk;29.0.14206865'
-      - name: Native config validation tests
-        if: matrix.abi == 'x86_64'
-        env:
-          CARGO_BUILD_JOBS: '2'
-        run: cargo +1.95.0 test --locked --manifest-path native/easytier-bridge/Cargo.toml --lib
       - name: Build native adapter
         run: python3 scripts/build-easytier-android.py --abi '${{ matrix.abi }}'
       - name: Upload unvalidated native prototype
@@ -61,4 +74,19 @@ jobs:
           path: core/build/native-jni/${{ matrix.abi }}/
           if-no-files-found: error
           retention-days: 14
-
+  native-host-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          submodules: true
+      - name: Install host build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler cmake clang pkg-config
+          rustup toolchain install 1.95.0 --profile minimal
+      - name: Native config validation and panic prevention
+        env:
+          CARGO_BUILD_JOBS: '2'
+        run: cargo +1.95.0 test --locked --manifest-path native/easytier-bridge/Cargo.toml --lib

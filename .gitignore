@@ -72,3 +72,4 @@ coverage.out
 *.test.exe
 /private-device/
 /artifacts/
+__pycache__/

@@ -35,6 +35,12 @@ is available in `native/easytier-upstream/easytier/LICENSE`.
 - A JNI native EasyTier adapter with one active instance, independent phone ID,
   borrowed packet descriptor duplication, generation checks and fixed errors.
   Status projection excludes TOML, secrets, public peer endpoints and raw events.
+- A dormant CMFA Go lifecycle adapter and a gVisor packet endpoint reusing the
+  real Mihomo inbound handler. The host TCP/UDP echo test exercises packet decode
+  and return framing; its mock policy delegate does not prove Android routing.
+- Imported native flags are validated before upstream's infallible deserializer;
+  invalid fields cannot intentionally abort the Java process. Host file sources,
+  management portals, exit routes and phone gateway advertisements are rejected.
 - Native build script and CI for Linux transport/race/fuzz tests and Android
   arm64/x86_64 native-library compilation.
 
