@@ -28,7 +28,7 @@ jobs:
           native = True
           if os.environ['EVENT_NAME'] == 'push' and re.fullmatch(r'[0-9a-f]{40}', base) and base != '0' * 40:
               paths = subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines()
-              native = any(p.startswith(('native/easytier-bridge/','native/easytier-upstream','service/src/main/java/com/github/kr328/clash/service/easytier/','app/src/androidTest/')) or p in ('.gitmodules','scripts/build-easytier-android.py','scripts/test-packet-prototype-emulator.py','build.gradle.kts','core/build.gradle.kts','service/src/main/java/com/github/kr328/clash/service/TunService.kt','.github/workflows/native-mesh-validation.yml') for p in paths)
+              native = any(p.startswith(('native/','core/src/main/','service/src/main/','app/src/androidTest/')) or p in ('.gitmodules','scripts/build-easytier-android.py','scripts/test-packet-prototype-emulator.py','build.gradle.kts','core/build.gradle.kts','app/src/main/java/com/github/kr328/clash/MainApplication.kt','.github/workflows/native-mesh-validation.yml') for p in paths)
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('native=' + str(native).lower() + '\n')
           PY
@@ -83,7 +83,14 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           submodules: true
+      - name: Reuse only native libraries with identical locked inputs
+        id: native-cache
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: core/build/native-jni/${{ matrix.abi }}/
+          key: native-payload-v1-${{ runner.os }}-${{ matrix.abi }}-${{ hashFiles('native/easytier-bridge/src/**/*.rs', 'native/easytier-bridge/Cargo.toml', 'native/easytier-bridge/Cargo.lock', 'scripts/build-easytier-android.py') }}
       - name: Install build dependencies
+        if: steps.native-cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y protobuf-compiler cmake clang pkg-config
@@ -91,7 +98,10 @@ jobs:
           rustup target add --toolchain 1.95.0 aarch64-linux-android x86_64-linux-android
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'ndk;29.0.14206865'
       - name: Build native adapter
+        if: steps.native-cache.outputs.cache-hit != 'true'
         run: python3 scripts/build-easytier-android.py --abi '${{ matrix.abi }}'
+      - name: Verify artifact input identity and digest
+        run: python3 scripts/build-easytier-android.py --abi '${{ matrix.abi }}' --verify-only
       - name: Upload unvalidated native prototype
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:

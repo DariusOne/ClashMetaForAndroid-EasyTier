@@ -28,7 +28,7 @@ def main():
         raise RuntimeError("Build both prototype and instrumentation APKs first")
     report = ROOT / "app/build/reports/native-mesh-emulator"
     report.mkdir(parents=True, exist_ok=True)
-    result = {"kind": "disposable-emulator-lifecycle-smoke", "passed": False, "cycles": 10,
+    result = {"kind": "disposable-emulator-lifecycle-smoke", "passed": False, "requested_cycles": 10, "completed_cycles": None,
               "real_device_validated": False, "peer_network_validated": False, "complete_integration": False}
     try:
         call("install", "-r", str(apk[0]))
@@ -46,6 +46,7 @@ def main():
             print(output[-12000:], flush=True)
             raise RuntimeError("Android lifecycle smoke test failed; inspect instrumentation report")
         result["passed"] = True
+        result["completed_cycles"] = 10
     finally:
         (report / "result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
         (report / "logcat.txt").write_text(call("logcat", "-d", "-t", "2000"), encoding="utf-8")
