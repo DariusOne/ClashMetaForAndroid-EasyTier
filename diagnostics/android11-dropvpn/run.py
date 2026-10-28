@@ -100,8 +100,18 @@ def main():
                 '<activity android:name="fixture.dropvpn.DropVpnActivity" android:exported="true"/>'
                 '<service android:name="fixture.dropvpn.DropVpnService" android:permission="android.permission.BIND_VPN_SERVICE" android:exported="false">'
                 '<intent-filter><action android:name="android.net.VpnService"/></intent-filter></service>', key)
-            probe = build_apk(tmp / 'probe', sdk, TEST_PACKAGE,
-                [ROOT / 'app/src/androidTest/java/com/github/kr328/clash/HandoverProbeActivity.java'],
+            # A drop-only request spends its entire deadline waiting. Shorten
+            # ONLY this copy's per-request timeout so the finite window samples
+            # handovers instead of being dominated by blocked waits. The normal
+            # native-network fixture and its success thresholds are unchanged.
+            probe_source = tmp / 'HandoverProbeActivity.java'
+            source = (ROOT / 'app/src/androidTest/java/com/github/kr328/clash/HandoverProbeActivity.java').read_text()
+            for old, new in [('SystemClock.elapsedRealtime() + 200', 'SystemClock.elapsedRealtime() + 50'),
+                             ('Thread.sleep(10);', 'Thread.sleep(1);')]:
+                if source.count(old) != 1: raise RuntimeError('Probe copy no longer matches reviewed deadline change')
+                source = source.replace(old, new)
+            probe_source.write_text(source)
+            probe = build_apk(tmp / 'probe', sdk, TEST_PACKAGE, [probe_source],
                 '<activity android:name="com.github.kr328.clash.HandoverProbeActivity" android:exported="true"/>', key)
             for package, binary in ((PACKAGE, apk), (TEST_PACKAGE, probe)):
                 run(adb + ['install', '-t', str(binary)]); installed.append(package)
@@ -145,11 +155,14 @@ def main():
                     time.sleep(.02)
                 else: raise RuntimeError('App UID probes did not start')
                 replacements = []
+                complete = True
                 for _ in range(changes):
                     if any((watch.read(mode) or {}).get('done') for mode in MODES):
-                        raise RuntimeError('Probe ended before replacements')
+                        complete = False
+                        break
                     replacements.append(replace())
                 row = {'label':label, 'replacements':replacements,
+                       'requested_replacements':changes, 'complete_window':complete,
                        'probes':watch.finish({mode:lambda e=e:list(e.sources) for mode,e in echoes.items()})}
                 for value in row['probes'].values():
                     if value.get('failure_code') or value['attempts'] < 1: raise RuntimeError('Invalid app probe result')
@@ -159,6 +172,7 @@ def main():
                 row['vpn_state'] = status()
                 result['windows'].append(row)
                 watch.close(); watch = None
+                if not complete: raise RuntimeError('Probe ended before replacements; partial observations retained')
                 return row
 
             control = window('reachable-before-vpn', 0)
@@ -167,7 +181,7 @@ def main():
             baseline = window('drop-only-without-replacement', 0)
             if baseline['received'] or baseline['peer_connections_or_datagrams']:
                 raise RuntimeError('Drop-only baseline invalid')
-            for _ in range(3): window('drop-only-during-replacement', 8)
+            for _ in range(6): window('drop-only-during-replacement', 2)
             if status().get('discarded_packets', 0) < 1: raise RuntimeError('No discarded TUN packets observed')
             command(-1)
             deadline = time.monotonic() + 5
