@@ -186,3 +186,17 @@ Physical baseline-app, DNS/Fake-IP, HTTP/SOCKS inbounds, IPv6, native UDP/STUN/Q
 transports, cellular peer connectivity, DHCP/published-route rebuilds and sustained
 run rows remain unpassed.
 Gate C is intentionally not rolled out.
+
+The user rejected settings-dependent lockdown and explicit-reconnect workarounds.
+Preserve bypass-private and application exclusions; no production setting or
+real-phone configuration was changed. Run `40673276524` confirms both diagnostic
+modes now clean up and restore correctly. Ordinary mode still failed on its
+first forced replacement (eight shell Go TCP wrong sources and one peer-observed
+ordinary app TCP wrong source); the guarded comparison again broke bypass-private
+LAN access. No failed APK was released.
+
+The pinned EasyTier 2.6.4 Android implementation also stops/re-establishes its VPN
+when addresses/routes change; it does not supply an atomic public address/route
+update mechanism to reuse. A separate `diagnostics/android11-dropvpn` workflow
+now removes both engines from the experiment and tests a discard-only public-API
+VPN. Its result is diagnostic and cannot relax the native acceptance gate.

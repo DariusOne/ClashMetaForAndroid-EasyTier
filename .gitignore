@@ -73,3 +73,4 @@ coverage.out
 /private-device/
 /artifacts/
 __pycache__/
+/diagnostics/android11-dropvpn/result/
