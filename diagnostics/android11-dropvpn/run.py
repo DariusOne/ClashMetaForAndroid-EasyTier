@@ -125,7 +125,10 @@ def main():
                 except (subprocess.SubprocessError, ValueError): return {}
 
             def command(value):
-                run(adb + ['shell', 'am', 'start', '-W', '-f', '0x10008000', '-n', PACKAGE + '/fixture.dropvpn.DropVpnActivity',
+                # This control activity immediately finishes. Waiting for its
+                # first rendered frame can consume the entire probe window;
+                # the matching private status is our readiness acknowledgement.
+                run(adb + ['shell', 'am', 'start', '-f', '0x10008000', '-n', PACKAGE + '/fixture.dropvpn.DropVpnActivity',
                            '--es', 'guard', 'disposable-ci-only', '--ei', 'sequence', str(value)])
 
             def replace():
@@ -161,6 +164,9 @@ def main():
                         complete = False
                         break
                     replacements.append(replace())
+                    if any((watch.read(mode) or {}).get('done') for mode in MODES):
+                        complete = False
+                        break
                 row = {'label':label, 'replacements':replacements,
                        'requested_replacements':changes, 'complete_window':complete,
                        'probes':watch.finish({mode:lambda e=e:list(e.sources) for mode,e in echoes.items()})}
