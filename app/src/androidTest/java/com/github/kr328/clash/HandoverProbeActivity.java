@@ -6,10 +6,15 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Process;
 import android.os.SystemClock;
+import android.system.ErrnoException;
+import android.system.Os;
+import android.system.OsConstants;
+import android.system.StructPollfd;
 import android.util.AtomicFile;
 import android.util.Log;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileDescriptor;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -36,6 +41,8 @@ public final class HandoverProbeActivity extends Activity {
         final int sequence = getIntent().getIntExtra("sequence", 0);
         final int tcp = getIntent().getIntExtra("tcpPort", 0);
         final int udp = getIntent().getIntExtra("udpPort", 0);
+        final int tcp4 = getIntent().getIntExtra("tcp4Port", 0);
+        final int udp4 = getIntent().getIntExtra("udp4Port", 0);
         final int owner;
         try {
             owner = getPackageManager().getApplicationInfo(
@@ -49,7 +56,8 @@ public final class HandoverProbeActivity extends Activity {
                 !"disposable-ci-only".equals(getIntent().getStringExtra("guard")) ||
                 Process.myUid() < 10000 || Process.myUid() == owner ||
                 sequence < 1 || sequence > 100 || tcp < 1024 || tcp > 65535 ||
-                udp < 1024 || udp > 65535) {
+                udp < 1024 || udp > 65535 || tcp4 < 1024 || tcp4 > 65535 ||
+                udp4 < 1024 || udp4 > 65535) {
             Log.w("HandoverProbe", "FIXTURE_GUARD_FAILED");
             finish(); return;
         }
@@ -58,9 +66,10 @@ public final class HandoverProbeActivity extends Activity {
             Log.w("HandoverProbe", "FIXTURE_STORAGE_FAILED");
             finish(); return;
         }
-        final AtomicInteger remaining = new AtomicInteger(2);
-        for (String mode : new String[] {"tcp", "udp"}) {
-            final int port = "tcp".equals(mode) ? tcp : udp;
+        final AtomicInteger remaining = new AtomicInteger(4);
+        for (String mode : new String[] {"tcp", "udp", "tcp4", "udp4"}) {
+            final int port = "tcp".equals(mode) ? tcp : "udp".equals(mode) ? udp :
+                    "tcp4".equals(mode) ? tcp4 : udp4;
             new Thread(() -> {
                 try { probe(mode, port, sequence, owner); }
                 finally {
@@ -68,6 +77,57 @@ public final class HandoverProbeActivity extends Activity {
                 }
             }, "handover-" + mode).start();
         }
+    }
+
+    private static void waitOs(FileDescriptor fd, short events, long deadline)
+            throws IOException, ErrnoException {
+        StructPollfd poll = new StructPollfd();
+        poll.fd = fd; poll.events = events;
+        long left = deadline - SystemClock.elapsedRealtime();
+        if (left <= 0 || Os.poll(new StructPollfd[] {poll}, (int)left) == 0)
+            throw new IOException("DEADLINE");
+    }
+
+    /** Explicit AF_INET through the public Android Os API; default Java NIO
+     * commonly opens AF_INET6 dual-stack sockets and is a separate test path. */
+    private static void exchangeIpv4(boolean udp, InetSocketAddress target, byte[] request,
+                                     ByteBuffer response, Counts counts, long deadline) throws IOException {
+        FileDescriptor fd = null;
+        try {
+            fd = Os.socket(OsConstants.AF_INET, udp ? OsConstants.SOCK_DGRAM : OsConstants.SOCK_STREAM, 0);
+            Os.fcntlInt(fd, OsConstants.F_SETFL, OsConstants.O_NONBLOCK);
+            try { Os.connect(fd, target.getAddress(), target.getPort()); }
+            catch (ErrnoException e) {
+                if (e.errno != OsConstants.EINPROGRESS) throw e;
+                waitOs(fd, (short)OsConstants.POLLOUT, deadline);
+                if (Os.getsockoptInt(fd, OsConstants.SOL_SOCKET, OsConstants.SO_ERROR) != 0)
+                    throw new IOException("CONNECT_FAILED");
+            }
+            counts.source((InetSocketAddress)Os.getsockname(fd));
+            int sent = 0;
+            while (sent < request.length) {
+                if (SystemClock.elapsedRealtime() >= deadline) throw new IOException("DEADLINE");
+                try { sent += Os.write(fd, request, sent, request.length-sent); }
+                catch (ErrnoException e) {
+                    if (e.errno != OsConstants.EAGAIN) throw e;
+                    waitOs(fd, (short)OsConstants.POLLOUT, deadline);
+                }
+            }
+            byte[] chunk = new byte[request.length];
+            while (response.hasRemaining()) {
+                if (SystemClock.elapsedRealtime() >= deadline) throw new IOException("DEADLINE");
+                try {
+                    int count = Os.read(fd, chunk, 0, Math.min(chunk.length,response.remaining()));
+                    if (count <= 0) throw new IOException("EOF");
+                    response.put(chunk,0,count);
+                    if (udp) break;
+                } catch (ErrnoException e) {
+                    if (e.errno != OsConstants.EAGAIN) throw e;
+                    waitOs(fd, (short)OsConstants.POLLIN, deadline);
+                }
+            }
+        } catch (ErrnoException e) { throw new IOException("SOCKET_OPERATION_FAILED"); }
+        finally { if (fd != null) try { Os.close(fd); } catch (ErrnoException ignored) { } }
     }
 
     private void save(String mode, JSONObject value) throws IOException {
@@ -130,7 +190,9 @@ public final class HandoverProbeActivity extends Activity {
                         .getBytes(StandardCharsets.US_ASCII);
                 ByteBuffer response = ByteBuffer.allocate(request.length);
                 try (Selector selector = Selector.open()) {
-                    if ("tcp".equals(mode)) {
+                    if (mode.endsWith("4")) {
+                        exchangeIpv4("udp4".equals(mode), address, request, response, c, deadline);
+                    } else if ("tcp".equals(mode)) {
                         try (SocketChannel channel = SocketChannel.open()) {
                             channel.configureBlocking(false);
                             SelectionKey key = channel.register(selector, SelectionKey.OP_CONNECT);

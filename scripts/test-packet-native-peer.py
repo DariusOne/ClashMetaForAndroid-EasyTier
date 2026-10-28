@@ -23,7 +23,7 @@ import uuid
 import zipfile
 from fixture_file_stage import atomic_stage_script
 from fixture_transition_watch import TransitionWatch
-from fixture_android_uid_watch import AndroidUidWatch
+from fixture_android_uid_watch import AndroidUidWatch, MODES as APP_MODES
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "com.github.metacubex.clash.meshprototype.meta"
@@ -78,6 +78,32 @@ class Echo:
         self.thread.join(2)
 
 
+def stop_capture(process):
+    if process is not None and process.poll() is None:
+        subprocess.run(["sudo", "kill", "-TERM", "--", "-" + str(process.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try: process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            subprocess.run(["sudo", "kill", "-KILL", "--", "-" + str(process.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            process.wait(timeout=5)
+
+
+def underlay_observations(report, cycles):
+    path = report / 'underlay-packet-headers.txt'
+    if not path.is_file(): return {'available':False}
+    by_port = {}
+    for cycle in cycles:
+        for family,ports in cycle.get('fixture_ports',{}).items():
+            for mode,port in ports.items(): by_port[port] = family+'_'+mode
+    observations = {}
+    for line in path.read_text().splitlines():
+        match = re.search(r'> 10\.126\.0\.1\.(\d+):',line)
+        if match:
+            key = by_port.get(int(match[1]),'other_fixture')
+            observations[key] = observations.get(key,0)+1
+    return {'available':True,'header_observations':sum(observations.values()),
+            'by_probe':observations,'counts_are_packets_not_unique_connections':True}
+
+
 def main():
     if os.environ.get("GITHUB_ACTIONS") != "true" or os.name != "posix":
         raise RuntimeError("Disposable Linux CI only")
@@ -103,7 +129,7 @@ def main():
     result = {"kind": "disposable-emulator-real-native-peer", "passed": False,
               "real_device_validated": False, "complete_integration": False,
               "dns_fakeip_validated": False, "discovery_validated": False, "checks": {}}
-    peer = instrument = instrumentation = capture = None
+    peer = instrument = instrumentation = capture = underlay_capture = None
     helpers = []
     transition_watches = []
     android_uid_watch = None
@@ -163,6 +189,11 @@ def main():
             packet_log = stack.enter_context((report / "mesh-packet-headers.txt").open("w"))
             capture = subprocess.Popen(["sudo", "-n", "tcpdump", "-n", "-l", "-tt", "-i", "ci-et-peer", "-c", "2000",
                                         "net 10.126.0.0/24 and (tcp or udp) and not (src net 10.126.0.0/24 and dst net 10.126.0.0/24)"], stdout=packet_log, stderr=subprocess.STDOUT, start_new_session=True)
+            # Header text only, fixed synthetic peer destination, no payloads
+            # or encrypted mesh-transport traffic. Includes unsuccessful SYNs.
+            underlay_log = stack.enter_context((report / "underlay-packet-headers.txt").open("w"))
+            underlay_capture = subprocess.Popen(["sudo", "-n", "tcpdump", "-n", "-l", "-tt", "-s", "80", "-i", "any", "-c", "2000",
+                "dst host 10.126.0.1 and (tcp or udp) and not src net 10.126.0.0/24"], stdout=underlay_log, stderr=subprocess.STDOUT, start_new_session=True)
             phone = f"ipv4='10.126.0.2/24'\ndhcp=false\nlisteners=[]\nstun_servers=[]\nstun_servers_v6=[]\n[[peer]]\nuri='tcp://10.0.2.2:{port}'\n" + identity + "[flags]\nmtu=1380\nenable_ipv6=false\ndisable_p2p=true\n"
             stage("mesh.toml", phone)
             stage("ci-peer-guard", "disposable-ci-only")
@@ -331,9 +362,9 @@ def main():
                     transition_watches.append(watch)
                     watches.append((mode,echo,watch))
                 for _,_,watch in watches: watch.ready()
-                app_echoes = {mode:Echo(mode == "udp") for mode in ("tcp", "udp")}
+                app_echoes = {mode:Echo(mode.startswith("udp")) for mode in APP_MODES}
                 for echo in app_echoes.values(): stack.callback(echo.close)
-                android_uid_watch = AndroidUidWatch(adb, sequence, app_echoes["tcp"].port, app_echoes["udp"].port)
+                android_uid_watch = AndroidUidWatch(adb, sequence, {mode:echo.port for mode,echo in app_echoes.items()})
                 android_uid_watch.ready()
                 bionic_watches = []
                 for mode in ("tcp", "udp"):
@@ -343,6 +374,10 @@ def main():
                     transition_watches.append(watch)
                     bionic_watches.append((mode, echo, watch))
                 for _,_,watch in bionic_watches: watch.ready()
+                cycle['fixture_ports'] = {
+                    'go': {mode:echo.port for mode,echo,_ in watches},
+                    'app': {mode:echo.port for mode,echo in app_echoes.items()},
+                    'bionic': {mode:echo.port for mode,echo,_ in bionic_watches}}
                 stage("rebuild-request", str(sequence))
                 deadline = time.monotonic() + 20
                 while time.monotonic() < deadline:
@@ -400,6 +435,11 @@ def main():
                     raise RuntimeError("Inbound packets did not recover after rebuild")
                 cycle.update({"passed": True, "outbound_tcp": "5/5", "outbound_udp": "5/5", "inbound_icmp": "5/5"})
                 original = state
+            stop_capture(underlay_capture)
+            observations = underlay_observations(report, rebuilds)
+            result['checks']['underlay_headers'] = observations
+            if underlay_capture.returncode != 0 or not observations['available'] or observations['header_observations']:
+                raise RuntimeError('Synthetic mesh traffic observed on wrong-source underlay')
             stage("peer-result.json", '{"passed":true}')
             instrument.wait(timeout=30)
             instrumentation.flush()
@@ -432,13 +472,9 @@ def main():
                 except (OSError, subprocess.SubprocessError):
                     result["passed"] = False
                     result["android_uid_probe_cleanup_failed"] = True
-            if capture is not None and capture.poll() is None:
-                subprocess.run(["sudo", "kill", "-TERM", "--", "-" + str(capture.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                try:
-                    capture.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    subprocess.run(["sudo", "kill", "-KILL", "--", "-" + str(capture.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    capture.wait(timeout=5)
+            for captured in (capture, underlay_capture):
+                stop_capture(captured)
+            result['checks']['underlay_headers'] = underlay_observations(report, result['checks'].get('interface_rebuilds',[]))
             if peer is not None and peer.poll() is None:
                 subprocess.run(["sudo", "kill", "-TERM", "--", "-" + str(peer.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 try:

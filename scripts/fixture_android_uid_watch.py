@@ -5,14 +5,16 @@ import time
 
 PACKAGE = 'com.github.metacubex.clash.meshprototype.meta.test'
 COMPONENT = PACKAGE + '/com.github.kr328.clash.HandoverProbeActivity'
+MODES = ('tcp','udp','tcp4','udp4')
 
 
 class AndroidUidWatch:
-    def __init__(self, adb, sequence, tcp_port, udp_port):
+    def __init__(self, adb, sequence, ports):
         self.adb, self.sequence = adb, sequence
+        extras = [part for mode in MODES for part in ('--ei',mode+'Port',str(ports[mode]))]
         launch = subprocess.run(adb + ['shell','am','start','-W','-f','0x10008000',
             '-n',COMPONENT,'--es','guard','disposable-ci-only','--ei','sequence',str(sequence),
-            '--ei','tcpPort',str(tcp_port),'--ei','udpPort',str(udp_port)],
+            ] + extras,
             capture_output=True, text=True, timeout=10)
         if launch.returncode:
             combined = launch.stdout + launch.stderr
@@ -35,21 +37,21 @@ class AndroidUidWatch:
     def ready(self):
         deadline = time.monotonic()+10
         while time.monotonic() < deadline:
-            if all((self.read(mode) or {}).get('ready') for mode in ('tcp','udp')): return
+            if all((self.read(mode) or {}).get('ready') for mode in MODES): return
             time.sleep(.05)
-        states = [self.read(mode) or {} for mode in ('tcp','udp')]
+        states = [self.read(mode) or {} for mode in MODES]
         codes = [state.get('failure_code') for state in states]
         code = next((x for x in codes if x in ('INTERRUPTED','FIXTURE_RUNTIME_FAILED')), 'NOT_READY')
         raise RuntimeError('Android app UID probe baseline failed: '+code)
 
     def running(self):
-        states = [self.read(mode) or {} for mode in ('tcp','udp')]
+        states = [self.read(mode) or {} for mode in MODES]
         return all(state.get('ready') and not state.get('done') for state in states)
 
     def finish(self, sources):
         deadline = time.monotonic()+12
         while time.monotonic() < deadline:
-            results = {mode:self.read(mode) for mode in ('tcp','udp')}
+            results = {mode:self.read(mode) for mode in MODES}
             if all(value and value.get('done') for value in results.values()): break
             time.sleep(.05)
         else: raise RuntimeError('Android app UID probe deadline failed')
