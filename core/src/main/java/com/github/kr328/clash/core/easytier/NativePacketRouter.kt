@@ -21,4 +21,6 @@ object NativePacketRouter {
     external fun interfaceName(fd: Int): String?
     // Always adopts fd, on success AND failure, exactly as start does.
     external fun replaceInterface(fd: Int, request: String): Boolean
+    // Physical handover with unchanged addresses/routes retains the same TUN.
+    external fun refreshNetwork(request: String): Boolean
 }

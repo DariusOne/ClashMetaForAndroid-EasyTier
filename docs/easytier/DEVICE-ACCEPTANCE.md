@@ -68,7 +68,21 @@ ready. It records blocked requests separately and rejects any wrong source in
 completed sockets or peer-observed connections/datagrams. Post-ready strict
 5/5 tests remain separate. This finite fixture does not inspect every rejected
 SYN on an underlay and does not establish an OS-wide lockdown guarantee.
-Until its results are recorded, continuous handover remains unaccepted.
+The Android 17 physical fixture recorded 1,102 attempts across three rebuilds,
+1,087 replies, 15 uncompleted requests and no incorrect source. Android 11 CI
+40650254407 failed with five wrong-source TCP requests. Distinct NetworkAgent
+handover did not solve it (run 40653152921: ten incorrect TCP sources); that
+experiment was removed. Run 40654434328 classified seven wrong TCP sources as
+neither the mesh address nor the Clash virtual gateway, while its mesh-NIC
+header filter saw no packets with those sources. None of these failures is
+overridden by a later post-ready or newer-platform pass.
+
+Physical-network changes with unchanged VPN addresses/routes now retain the
+Android descriptor. Network scope, overlap decisions and native readiness are
+updated in one policy commit. The emulator fixture separately tests actual
+Wi-Fi/cellular changes and forced interface replacements with the same strict
+continuous-source assertions. Address/route changes still require replacement;
+that Android 11 acceptance gate remains unresolved and is not skipped.
 
 The first physical arm64 Android 17 fixture was executed on 2026-10-28 using
 prototype commit `46f358e0dd3ed3288e31186567fba2224db5ff13` and a private,

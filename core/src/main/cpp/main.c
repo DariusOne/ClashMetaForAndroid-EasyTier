@@ -185,6 +185,13 @@ Java_com_github_kr328_clash_core_easytier_NativePacketRouter_replaceInterface(JN
     return replacePacketInterface(fd, configuration) == 0 ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_github_kr328_clash_core_easytier_NativePacketRouter_refreshNetwork(JNIEnv *env, jobject thiz,
+                                                                        jstring request) {
+    scoped_string configuration = get_string(request);
+    return refreshPacketNetwork(configuration) == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_github_kr328_clash_core_bridge_Bridge_nativeStartHttp(JNIEnv *env, jobject thiz,
                                                                jstring listen_at) {

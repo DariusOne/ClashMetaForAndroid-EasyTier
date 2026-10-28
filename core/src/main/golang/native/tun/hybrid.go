@@ -109,6 +109,18 @@ func (h *Hybrid) ApplySnapshot(snapshot router.NativeSnapshot, installed []netip
 	return h.policy.ApplyNativeSnapshot(snapshot, installed)
 }
 
+// RefreshNetwork changes only packet policy, never the Android descriptor or
+// either engine. Network disappearance retains the VPN; recovery reopens mesh
+// destinations only after the current network scope and snapshot are committed.
+func (h *Hybrid) RefreshNetwork(snapshot router.NativeSnapshot, installed []netip.Prefix, network string, locals []netip.Prefix) error {
+	h.updates.Lock()
+	defer h.updates.Unlock()
+	if h.stopped.Load() || h.interfacePaused {
+		return ErrHybridStart
+	}
+	return h.policy.RefreshNativeNetwork(snapshot, installed, network, locals)
+}
+
 // SuspendInterface must complete before Android Builder.establish replaces the
 // old TUN. Keep both engines and the SAME policy (including withdrawn routes).
 func (h *Hybrid) SuspendInterface(session uint64) error {

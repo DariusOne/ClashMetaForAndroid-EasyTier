@@ -5,6 +5,54 @@ import (
 	"testing"
 )
 
+func TestPhysicalRefreshRetainsOwnershipAndResetsOnlyChangedConflictScope(t *testing.T) {
+	p, _ := NewPolicy(Config{Mode: Combined, Session: 7, Profile: "fixture", Network: "wifi"})
+	s := NativeSnapshot{Schema: 1, Generation: 7, Running: true, Attached: true, Addresses: []string{"10.77.0.2/24"}, Routes: []string{"192.168.12.0/24"}}
+	installed := []netip.Prefix{netip.MustParsePrefix(s.Addresses[0])}
+	locals := []netip.Prefix{netip.MustParsePrefix("10.77.0.0/24")}
+	if err := p.RefreshNativeNetwork(s, installed, "wifi", locals); err != nil {
+		t.Fatal(err)
+	}
+	choice := []Conflict{{Prefix: locals[0], Choice: UseClash}}
+	if err := p.SetConflicts(7, "fixture", "wifi", choice); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.RefreshNativeNetwork(s, installed, "wifi", locals); err != nil {
+		t.Fatal(err)
+	}
+	if p.Decide(netip.MustParseAddr("10.77.0.9")) != Clash {
+		t.Fatal("same-network choice discarded")
+	}
+	s.Routes = nil
+	if err := p.RefreshNativeNetwork(s, installed, "cell", locals); err != nil {
+		t.Fatal(err)
+	}
+	if p.Decide(netip.MustParseAddr("10.77.0.9")) != Drop {
+		t.Fatal("conflict crossed physical networks")
+	}
+	if p.Decide(netip.MustParseAddr("192.168.12.9")) != Drop {
+		t.Fatal("withdrawal escaped on handover")
+	}
+	if p.Decide(netip.MustParseAddr("192.168.13.9")) != Clash {
+		t.Fatal("unmanaged private destination changed")
+	}
+	if err := p.RefreshNativeNetwork(s, installed, "new-wifi", nil); err != nil {
+		t.Fatal(err)
+	}
+	if p.Decide(netip.MustParseAddr("10.77.0.9")) != EasyTier {
+		t.Fatal("mesh did not recover with unchanged interface")
+	}
+	before := p.v.Load()
+	stale := s
+	stale.Generation++
+	if p.RefreshNativeNetwork(stale, installed, "bad-network", nil) == nil || p.v.Load() != before {
+		t.Fatal("stale refresh changed policy")
+	}
+	if p.RefreshNativeNetwork(s, installed, "", nil) == nil || p.v.Load() != before {
+		t.Fatal("invalid network changed policy")
+	}
+}
+
 func TestSnapshotAddressChangeFailsClosedUntilInstalled(t *testing.T) {
 	p, err := NewPolicy(Config{Mode: Combined, Session: 1, Profile: "fixture", Network: "wifi"})
 	if err != nil {

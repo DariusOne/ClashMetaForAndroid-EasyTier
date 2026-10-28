@@ -264,6 +264,54 @@ def main():
                     raise RuntimeError("ICMP roundtrip failed: " + direction)
                 result["checks"]["mesh_" + direction + "_icmp"] = {"passed": 5, "expected": 5}
             original = json.loads(call("shell", "run-as", PACKAGE, "cat", FOLDER + "status.json"))
+            # Actual emulator Wi-Fi/cellular transitions with an unchanged
+            # VPN configuration must retain the descriptor. Interface rebuild
+            # acceptance remains a separate strict gate below, never skipped.
+            network_switches = []
+            result["checks"]["physical_network_switches"] = network_switches
+            if original.get("physical_transport") != "wifi":
+                raise RuntimeError("Emulator Wi-Fi baseline is required for handover acceptance")
+            for sequence, action in enumerate(("disable", "enable") * 3, 1):
+                cycle = {"cycle":sequence, "action":action, "passed":False}
+                network_switches.append(cycle)
+                watches = []
+                for mode in ("tcp", "udp"):
+                    echo = Echo(mode == "udp")
+                    stack.callback(echo.close)
+                    watch = TransitionWatch(adb + ["shell", "/data/local/tmp/cmfa-transition-probe", mode, str(echo.port)])
+                    transition_watches.append(watch)
+                    watches.append((mode,echo,watch))
+                for _,_,watch in watches: watch.ready()
+                call("shell", "svc", "wifi", action)
+                expected = "cellular" if action == "disable" else "wifi"
+                deadline = time.monotonic() + 15
+                while time.monotonic() < deadline:
+                    state = json.loads(call("shell", "run-as", PACKAGE, "cat", FOLDER + "status.json"))
+                    if state.get("stage", "").startswith("ET_"):
+                        raise RuntimeError("Physical network transition failed")
+                    if (state.get("stage") == "active" and state.get("physical_transport") == expected
+                            and state.get("network_revision",0) > original.get("network_revision",0)):
+                        break
+                    time.sleep(.1)
+                else:
+                    raise RuntimeError("Emulator physical network did not change before deadline")
+                cycle.update({"transport":state.get("physical_transport"),
+                              "same_interface":state["interface_revision"] == original["interface_revision"],
+                              "same_generation":state["generation"] == original["generation"],
+                              "transition_covered_ready":all(w.process.poll() is None for _,_,w in watches)})
+                cycle["transition"] = {mode:watch.finish(lambda echo=echo:list(echo.sources)) for mode,echo,watch in watches}
+                if (not cycle["same_interface"] or not cycle["same_generation"] or not cycle["transition_covered_ready"]
+                        or not all(x["passed"] for x in cycle["transition"].values())):
+                    raise RuntimeError("Physical handover packet/source assertion failed")
+                for mode in ("tcp", "udp"):
+                    echo = Echo(mode == "udp")
+                    stack.callback(echo.close)
+                    output = call("shell", "/data/local/tmp/cmfa-mesh-probe", mode + "-client", "10.126.0.1", str(echo.port))
+                    if "PASS 5/5" not in output or echo.sources != ["10.126.0.2"] * 5:
+                        raise RuntimeError("Physical handover recovery failed")
+                    cycle[mode + "_recovery"] = "5/5"
+                cycle["passed"] = True
+                original = state
             rebuilds = []
             result["checks"]["interface_rebuilds"] = rebuilds
             for sequence in range(1, 4):
@@ -335,6 +383,11 @@ def main():
             result["passed"] = True
         finally:
             for watch in transition_watches: watch.close()
+            try:
+                call("shell", "svc", "wifi", "enable")
+            except (OSError, subprocess.SubprocessError):
+                result["passed"] = False
+                result["wifi_restore_failed"] = True
             if not result["passed"]:
                 try:
                     stage("peer-result.json", '{"passed":false}')

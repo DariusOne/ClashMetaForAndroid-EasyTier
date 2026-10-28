@@ -149,3 +149,26 @@ func replacePacketInterface(fd C.int, requestJSON C.c_string) C.int {
 	}
 	return 0
 }
+
+//export refreshPacketNetwork
+func refreshPacketNetwork(requestJSON C.c_string) C.int {
+	rTunLock.Lock()
+	defer rTunLock.Unlock()
+	var request struct {
+		Snapshot      router.NativeSnapshot `json:"snapshot"`
+		Installed     []netip.Prefix        `json:"installed"`
+		Network       string                `json:"network"`
+		LocalNetworks []netip.Prefix        `json:"localNetworks"`
+	}
+	data := []byte(C.GoString(requestJSON))
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if len(data) > 512*1024 || decoder.Decode(&request) != nil || decoder.Decode(new(any)) != io.EOF || len(request.Installed) > 2 || len(request.LocalNetworks) > 64 || len(request.Network) > 256 || rTun == nil {
+		return 1
+	}
+	h, ok := rTun.closer.(*tun.Hybrid)
+	if !ok || h.RefreshNetwork(request.Snapshot, request.Installed, request.Network, request.LocalNetworks) != nil {
+		return 1
+	}
+	return 0
+}

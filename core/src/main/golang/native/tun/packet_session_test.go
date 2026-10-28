@@ -43,6 +43,49 @@ func ipFrame(src, dst [4]byte) []byte {
 	return p
 }
 
+func TestPhysicalNetworkRefreshKeepsPacketInterface(t *testing.T) {
+	tunFD, app := packetPair(t)
+	meshFD, native := packetPair(t)
+	h, err := StartPacketSession(tunFD, meshFD, sessionConfig(), &echoTunnel{seen: make(chan *C.Metadata, 8)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	s := router.NativeSnapshot{Schema: 1, Generation: 42, Running: true, Attached: true, Addresses: []string{"10.77.0.2/24"}}
+	installed := []netip.Prefix{netip.MustParsePrefix("10.77.0.2/24")}
+	outgoing := ipFrame([4]byte{10, 77, 0, 2}, [4]byte{10, 77, 0, 9})
+	incoming := ipFrame([4]byte{10, 77, 0, 9}, [4]byte{10, 77, 0, 2})
+	buf := make([]byte, 128)
+	for _, network := range []string{"wifi", "cell", "new-wifi"} {
+		if err := h.SetReady(42, false); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.RefreshNetwork(s, installed, network, nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := app.Write(outgoing); err != nil {
+			t.Fatal(err)
+		}
+		native.SetReadDeadline(time.Now().Add(time.Second))
+		if n, err := native.Read(buf); err != nil || string(buf[:n]) != string(outgoing) {
+			t.Fatalf("retained interface outbound: %v", err)
+		}
+		if _, err := native.Write(incoming); err != nil {
+			t.Fatal(err)
+		}
+		app.SetReadDeadline(time.Now().Add(time.Second))
+		if n, err := app.Read(buf); err != nil || string(buf[:n]) != string(incoming) {
+			t.Fatalf("retained interface inbound: %v", err)
+		}
+	}
+	if err := h.SuspendInterface(42); err != nil {
+		t.Fatal(err)
+	}
+	if h.RefreshNetwork(s, installed, "cell", nil) == nil {
+		t.Fatal("refresh reopened a paused replacement")
+	}
+}
+
 func TestPacketSessionLifecycleTenRestarts(t *testing.T) {
 	before, err := os.ReadDir("/proc/self/fd")
 	if err != nil {

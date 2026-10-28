@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/netip"
+	"slices"
 )
 
 // NativeSnapshot is the deliberately small native IPC contract. No peer URI,
@@ -65,6 +66,25 @@ func (s NativeSnapshot) parsed() ([]netip.Prefix, []netip.Prefix, error) {
 // Address changes need a new Android interface; until acknowledged all mesh
 // traffic stays closed, including known routes withdrawn by the new snapshot.
 func (p *Policy) ApplyNativeSnapshot(s NativeSnapshot, installedAddresses []netip.Prefix) error {
+	return p.applyNativeSnapshot(s, installedAddresses, "", nil)
+}
+
+// RefreshNativeNetwork retains the Android interface and commits the physical
+// conflict scope and mesh readiness together. A Wi-Fi/cellular change alone
+// must not tear down an otherwise identical VPN and expose an OS routing gap.
+func (p *Policy) RefreshNativeNetwork(s NativeSnapshot, installedAddresses []netip.Prefix, network string, locals []netip.Prefix) error {
+	if network == "" {
+		return ErrInvalidPolicy
+	}
+	var err error
+	locals, err = prefixes(locals, false)
+	if err != nil {
+		return err
+	}
+	return p.applyNativeSnapshot(s, installedAddresses, network, locals)
+}
+
+func (p *Policy) applyNativeSnapshot(s NativeSnapshot, installedAddresses []netip.Prefix, network string, locals []netip.Prefix) error {
 	addresses, routes, err := s.parsed()
 	if err != nil || s.Schema != 1 || len(s.Addresses) > 2 || len(s.Routes) > 4096 {
 		return ErrInvalidPolicy
@@ -113,6 +133,9 @@ func (p *Policy) ApplyNativeSnapshot(s NativeSnapshot, installedAddresses []neti
 		}
 	}
 	next := *old
+	if network != "" && (old.config.Network != network || !slices.Equal(old.config.LocalNetworks, locals)) {
+		next.config.Network, next.config.LocalNetworks, next.config.Conflicts = network, locals, nil
+	}
 	next.config.VirtualNetworks, next.config.DeviceAddresses = virtual, device
 	next.active, next.claimed = usable, claimed
 	next.ready = s.Running && s.Attached && installed
