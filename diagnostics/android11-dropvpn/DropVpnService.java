@@ -53,13 +53,13 @@ public final class DropVpnService extends VpnService {
                 .setSmallIcon(android.R.drawable.stat_sys_warning)
                 .setContentTitle("Disposable emulator diagnostic").build());
         // Independent hard deadline, including a host runner crash.
-        new Handler(Looper.getMainLooper()).postDelayed(this::stopSelf, 180_000);
+        new Handler(Looper.getMainLooper()).postDelayed(this::stopFixture, 180_000);
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         if (!allowed(this) || intent == null) { stopSelf(); return START_NOT_STICKY; }
         final int next = intent.getIntExtra("sequence", -1);
-        if (next == -1) { stopSelf(); return START_NOT_STICKY; }
+        if (next == -1) { stopFixture(); return START_NOT_STICKY; }
         if (next < 1 || next > 64) { stopSelf(); return START_NOT_STICKY; }
         worker.execute(() -> {
             try {
@@ -122,6 +122,18 @@ public final class DropVpnService extends VpnService {
                 file.finishWrite(output);
             } catch (Exception e) { file.failWrite(output); }
         } catch (Exception ignored) { /* Host requires a complete matching result. */ }
+    }
+
+    private void stopFixture() {
+        worker.execute(() -> {
+            // VpnService is also bound by the system. Waiting for onDestroy
+            // before closing its TUN can keep that binding alive indefinitely.
+            try { if (tun != null) tun.close(); } catch (Exception ignored) { }
+            tun = null;
+            save(false, true, "");
+            stopForeground(true);
+            stopSelf();
+        });
     }
 
     @Override public void onDestroy() {
