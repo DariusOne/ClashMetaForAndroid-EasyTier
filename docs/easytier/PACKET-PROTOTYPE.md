@@ -129,6 +129,19 @@ mean only that `cat` has opened an empty destination. A staged-stdin regression
 holds the writer midway through JSON and checks both new and replaced files;
 the command has also been exercised on the physical Android shell without a VPN.
 
+The Android 11 CI emulator exposed a handover readiness race: `establish()`
+returned before ConnectivityService applied the replacement interface/routes.
+Some immediately started probes used a nonmesh source despite receiving replies.
+The harness now obtains the exact TUN name from the borrowed descriptor and waits
+for matching VPN LinkProperties, addresses and unicast routes before returning
+the replacement or reporting active. Stale properties from an identically
+addressed previous interface cannot acknowledge it. The wait is bounded and
+cancellable; five source-checked requests still have to succeed without retries.
+This is a readiness barrier, **not an OS-wide lockdown guarantee during the
+handover itself**. Continuous traffic during transitions remains an acceptance
+gate; the prototype is not ready for production rollout. Header-only captures
+are restricted to the disposable CI mesh, not the user's network.
+
 To return this separate prototype to normal CMFA behavior, stop its VPN and
 remove only `no_backup/native-mesh-acceptance/enable` using run-as, or clear the
 prototype's app data. Neither action is needed for the user's original CMFA.

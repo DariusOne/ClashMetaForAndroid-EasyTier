@@ -16,6 +16,9 @@ object NativePacketRouter {
     external fun update(snapshot: String, installedAddresses: String): Boolean
     external fun failClosed(generation: Long)
     external fun suspendInterface(generation: Long): Boolean
+    // Borrows fd without closing or changing it. Never infer readiness from an
+    // old VPN interface which happens to have the same addresses and routes.
+    external fun interfaceName(fd: Int): String?
     // Always adopts fd, on success AND failure, exactly as start does.
     external fun replaceInterface(fd: Int, request: String): Boolean
 }

@@ -70,7 +70,7 @@ class PacketHarness private constructor(private val vpn: VpnService, private val
         scope.launch(Dispatchers.IO) { native?.close() }
     }
 
-    suspend fun open(tun: TunModule, allowRouteGrowth: Boolean, createVpn: (List<Address>, Set<String>) -> TunModule.TunDevice) {
+    suspend fun open(tun: TunModule, allowRouteGrowth: Boolean, createVpn: suspend (List<Address>, Set<String>) -> TunModule.TunDevice) {
         status("starting")
         val profile = File(directory, "mesh.toml")
         check(profile.isFile && profile.length() in 1..1024L * 1024) { "ET_PROFILE_REQUIRED" }

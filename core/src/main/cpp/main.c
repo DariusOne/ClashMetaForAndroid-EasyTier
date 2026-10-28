@@ -2,6 +2,9 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
+#include <net/if.h>
+#include <linux/if_tun.h>
+#include <sys/ioctl.h>
 
 #include "bridge_helper.h"
 #include "libclash.h"
@@ -162,6 +165,17 @@ JNIEXPORT jboolean JNICALL
 Java_com_github_kr328_clash_core_easytier_NativePacketRouter_suspendInterface(JNIEnv *env, jobject thiz,
                                                                           jlong generation) {
     return suspendPacketInterface(generation) == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+/* Borrow only: Java retains the descriptor until the OS route commit is seen. */
+JNIEXPORT jstring JNICALL
+Java_com_github_kr328_clash_core_easytier_NativePacketRouter_interfaceName(JNIEnv *env, jobject thiz,
+                                                                       jint fd) {
+    struct ifreq request;
+    memset(&request, 0, sizeof(request));
+    if (fd < 0 || ioctl(fd, TUNGETIFF, &request) < 0) return NULL;
+    request.ifr_name[IFNAMSIZ - 1] = '\0';
+    return (*env)->NewStringUTF(env, request.ifr_name);
 }
 
 JNIEXPORT jboolean JNICALL

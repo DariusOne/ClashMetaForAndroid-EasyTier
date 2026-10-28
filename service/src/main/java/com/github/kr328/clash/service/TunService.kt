@@ -4,6 +4,11 @@ import android.annotation.TargetApi
 import android.app.PendingIntent
 import android.content.Intent
 import android.net.ProxyInfo
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.LinkAddress
+import android.net.IpPrefix
+import android.net.RouteInfo
 import android.net.VpnService
 import android.os.Build
 import com.github.kr328.clash.common.compat.pendingIntentFlags
@@ -14,6 +19,8 @@ import com.github.kr328.clash.service.clash.module.*
 import com.github.kr328.clash.service.model.AccessControlMode
 import com.github.kr328.clash.service.store.ServiceStore
 import com.github.kr328.clash.service.easytier.PacketHarness
+import com.github.kr328.clash.service.easytier.VpnLinkCommit
+import com.github.kr328.clash.core.easytier.NativePacketRouter
 import com.github.kr328.clash.service.util.cancelAndJoinBlocking
 import com.github.kr328.clash.service.util.parseCIDR
 import com.github.kr328.clash.service.util.sendClashStarted
@@ -137,8 +144,13 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
         }
     }
 
-    private fun TunModule.buildDevice(store: ServiceStore, meshAddresses: List<PacketHarness.Address>, meshRoutes: Set<String>, nativeMesh: Boolean): TunModule.TunDevice {
+    private suspend fun TunModule.buildDevice(store: ServiceStore, meshAddresses: List<PacketHarness.Address>, meshRoutes: Set<String>, nativeMesh: Boolean): TunModule.TunDevice {
         return with(Builder()) {
+            val requiredRoutes = linkedSetOf<String>()
+            fun route(address: String, bits: Int) {
+                addRoute(address, bits)
+                requiredRoutes.add(IpPrefix("$address/$bits").toString())
+            }
             // Interface address
             // The mesh address is first so native packets use the phone's mesh
             // identity; source selection remains a required real-device test.
@@ -151,34 +163,34 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
             // Route
             if (store.bypassPrivateNetwork) {
                 resources.getStringArray(R.array.bypass_private_route).map(::parseCIDR).forEach {
-                    addRoute(it.ip, it.prefix)
+                    route(it.ip, it.prefix)
                 }
                 if (store.allowIpv6) {
                     resources.getStringArray(R.array.bypass_private_route6).map(::parseCIDR).forEach {
-                        addRoute(it.ip, it.prefix)
+                        route(it.ip, it.prefix)
                     }
                 }
 
                 // Route of virtual DNS
-                addRoute(TUN_DNS, 32)
+                route(TUN_DNS, 32)
                 if (store.allowIpv6) {
-                    addRoute(TUN_DNS6, 128)
+                    route(TUN_DNS6, 128)
                 }
             } else {
-                addRoute(NET_ANY, 0)
+                route(NET_ANY, 0)
                 if (store.allowIpv6) {
-                    addRoute(NET_ANY6, 0)
+                    route(NET_ANY6, 0)
                 }
             }
 
             if (nativeMesh) {
-                meshRoutes.map(::parseCIDR).forEach { addRoute(it.ip, it.prefix) }
-                addRoute("255.255.255.255", 32)
-                addRoute("224.0.0.251", 32)
-                addRoute("239.255.255.250", 32)
+                meshRoutes.map(::parseCIDR).forEach { route(it.ip, it.prefix) }
+                route("255.255.255.255", 32)
+                route("224.0.0.251", 32)
+                route("239.255.255.250", 32)
                 if (meshAddresses.any { it.ip.contains(":") }) {
-                    addRoute("ff02::fb", 128)
-                    addRoute("ff02::c", 128)
+                    route("ff02::fb", 128)
+                    route("ff02::c", 128)
                 }
             }
 
@@ -250,14 +262,48 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
                 allowBypass()
             }
 
-            TunModule.TunDevice(
-                fd = establish()?.detachFd()
-                    ?: throw NullPointerException("Establish VPN rejected by system"),
-                stack = store.tunStackMode,
-                gateway = "$TUN_GATEWAY/$TUN_SUBNET_PREFIX" + if (store.allowIpv6) ",$TUN_GATEWAY6/$TUN_SUBNET_PREFIX6" else "",
-                portal = TUN_PORTAL + if (store.allowIpv6) ",$TUN_PORTAL6" else "",
-                dns = if (store.dnsHijacking) NET_ANY else (TUN_DNS + if (store.allowIpv6) ",$TUN_DNS6" else ""),
-            )
+            val descriptor = establish()
+                ?: throw NullPointerException("Establish VPN rejected by system")
+            descriptor.use {
+                if (nativeMesh) {
+                    val name = NativePacketRouter.interfaceName(it.fd)
+                        ?: error("ET_INTERFACE_NAME_UNAVAILABLE")
+                    val addresses = (meshAddresses.map { address -> address.cidr } +
+                        "$TUN_GATEWAY/$TUN_SUBNET_PREFIX" +
+                        if (store.allowIpv6) listOf("$TUN_GATEWAY6/$TUN_SUBNET_PREFIX6") else emptyList())
+                        .map { address -> LinkAddress(address).toString() }.toSet()
+                    val expected = VpnLinkCommit(name, addresses, requiredRoutes)
+                    val connectivity = getSystemService(ConnectivityManager::class.java)
+                        ?: error("ET_CONNECTIVITY_UNAVAILABLE")
+                    // establish() returns before ConnectivityService processes
+                    // the new LinkProperties/routes. Keep the old descriptor and
+                    // dispatcher paused until the exact new interface is visible.
+                    // This acknowledges readiness, not an OS-wide lockdown during
+                    // the platform's handover window.
+                    withTimeout(5_000) {
+                        while (true) {
+                            val committed = connectivity.allNetworks.any { network ->
+                                val capabilities = connectivity.getNetworkCapabilities(network)
+                                val link = connectivity.getLinkProperties(network)
+                                link != null && capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true &&
+                                    expected.matches(link.interfaceName,
+                                        link.linkAddresses.map { address -> address.toString() }.toSet(),
+                                        link.routes.filter { route -> route.type == RouteInfo.RTN_UNICAST }
+                                            .map { route -> route.destination.toString() }.toSet())
+                            }
+                            if (committed) break
+                            delay(10)
+                        }
+                    }
+                }
+                TunModule.TunDevice(
+                    fd = it.detachFd(),
+                    stack = store.tunStackMode,
+                    gateway = "$TUN_GATEWAY/$TUN_SUBNET_PREFIX" + if (store.allowIpv6) ",$TUN_GATEWAY6/$TUN_SUBNET_PREFIX6" else "",
+                    portal = TUN_PORTAL + if (store.allowIpv6) ",$TUN_PORTAL6" else "",
+                    dns = if (store.dnsHijacking) NET_ANY else (TUN_DNS + if (store.allowIpv6) ",$TUN_DNS6" else ""),
+                )
+            }
         }
 
     }
