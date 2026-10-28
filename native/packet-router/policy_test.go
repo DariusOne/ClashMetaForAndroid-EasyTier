@@ -98,6 +98,10 @@ func TestOverlapDecisionsAreNetworkScoped(t *testing.T) {
 	if p.Decide(addr("192.168.100.10")) != Clash {
 		t.Fatal("delegate to original Clash")
 	}
+	_ = p.NetworkChanged(1, c.Network, c.LocalNetworks)
+	if p.Decide(addr("192.168.100.10")) != Clash {
+		t.Fatal("same-network rebuild discarded explicit choice")
+	}
 	_ = p.NetworkChanged(1, "wifi-b", c.LocalNetworks)
 	if p.Decide(addr("192.168.100.10")) != Drop {
 		t.Fatal("stale network choice")

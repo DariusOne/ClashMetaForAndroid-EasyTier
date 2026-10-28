@@ -5,6 +5,7 @@ package packetrouter
 import (
 	"errors"
 	"net/netip"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -172,7 +173,8 @@ func (p *Policy) SetReady(session uint64, ready bool) error {
 	return nil
 }
 
-// NetworkChanged discards overlap choices before applying new physical routes.
+// NetworkChanged discards overlap choices when the physical network changes.
+// Rebuilding the Android interface on the same network preserves its choices.
 func (p *Policy) NetworkChanged(session uint64, network string, locals []netip.Prefix) error {
 	if network == "" {
 		return ErrInvalidPolicy
@@ -186,6 +188,9 @@ func (p *Policy) NetworkChanged(session uint64, network string, locals []netip.P
 	old := p.v.Load()
 	if old == nil || old.config.Session != session {
 		return ErrStaleSession
+	}
+	if old.config.Network == network && slices.Equal(old.config.LocalNetworks, locals) {
+		return nil
 	}
 	next := *old
 	next.config.Network, next.config.LocalNetworks, next.config.Conflicts = network, locals, nil
