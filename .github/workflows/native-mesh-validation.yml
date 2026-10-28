@@ -71,6 +71,8 @@ jobs:
           python3 scripts/prepare-mihomo.py
       - name: Bounded physical SOCKS fixture regression
         run: python3 scripts/test_physical_socks_peer.py
+      - name: Atomic Android fixture publication regression
+        run: python3 scripts/test_fixture_file_stage.py
       - name: Real TCP and UDP through the Mihomo packet adapter
         working-directory: core/src/main/golang
         env:

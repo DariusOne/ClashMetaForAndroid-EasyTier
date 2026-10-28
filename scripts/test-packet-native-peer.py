@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import socket
 import subprocess
 import tempfile
@@ -20,6 +21,7 @@ import time
 import urllib.request
 import uuid
 import zipfile
+from fixture_file_stage import atomic_stage_script
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "com.github.metacubex.clash.meshprototype.meta"
@@ -90,7 +92,7 @@ def main():
         raise RuntimeError("Real devices are forbidden by this fixture")
 
     def stage(name, data):
-        command = "'umask 077; mkdir -p no_backup/native-mesh-acceptance; cat > " + FOLDER + name + "'"
+        command = shlex.quote(atomic_stage_script(name))
         subprocess.run(adb + ["shell", "-T", "run-as", PACKAGE, "sh", "-c", command], input=data.encode(),
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=15)
 

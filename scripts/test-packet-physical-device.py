@@ -12,11 +12,13 @@ import json
 from pathlib import Path
 import queue
 import re
+import shlex
 import subprocess
 import threading
 import time
 import tomllib
 import uuid
+from fixture_file_stage import atomic_stage_script
 
 PACKAGE = 'com.github.metacubex.clash.meshprototype.meta'
 FOLDER = 'no_backup/native-mesh-acceptance/'
@@ -87,8 +89,7 @@ def main():
     def adb(*command, **kwargs):
         return call(*base, *command, **kwargs)
     def stage(name, data):
-        assert name in {'physical-consent', 'mesh.toml', 'ci-peer-guard', 'ci-reject-port', 'peer-result.json', 'mode-request.json', 'rebuild-request','ci-proxy.json','network-options-request.json'}
-        command = "'umask 077; mkdir -p " + FOLDER + '; cat > ' + FOLDER + name + "'"
+        command = shlex.quote(atomic_stage_script(name))
         subprocess.run(base + ['shell', '-T', 'run-as', PACKAGE, 'sh', '-c', command], input=data, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=20)
     def read(name):
         assert name in {'peer-ready', 'status.json', 'mode-ready.json','network-options-ready.json'}

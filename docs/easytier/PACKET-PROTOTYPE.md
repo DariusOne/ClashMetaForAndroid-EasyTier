@@ -123,6 +123,12 @@ UDP associations; capacity rejections invalidate a run. Loopback regression cove
 the former eight-client failure, the complete two-phase workload and overflow.
 This does not validate public proxy exits or the combined HTTP/SOCKS inbound hook.
 
+Both host runners publish private control/completion files with a same-directory
+temporary write and atomic rename. Existence of the completion file must never
+mean only that `cat` has opened an empty destination. A staged-stdin regression
+holds the writer midway through JSON and checks both new and replaced files;
+the command has also been exercised on the physical Android shell without a VPN.
+
 To return this separate prototype to normal CMFA behavior, stop its VPN and
 remove only `no_backup/native-mesh-acceptance/enable` using run-as, or clear the
 prototype's app data. Neither action is needed for the user's original CMFA.
