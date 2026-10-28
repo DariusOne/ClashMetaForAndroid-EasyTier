@@ -6,7 +6,6 @@ import android.content.Intent
 import android.net.ProxyInfo
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.net.LinkAddress
 import android.net.IpPrefix
 import android.net.RouteInfo
 import android.net.VpnService
@@ -272,7 +271,7 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
                     val addresses = (meshAddresses.map { address -> address.cidr } +
                         "$TUN_GATEWAY/$TUN_SUBNET_PREFIX" +
                         if (store.allowIpv6) listOf("$TUN_GATEWAY6/$TUN_SUBNET_PREFIX6") else emptyList())
-                        .map { address -> parseCIDR(address).let { cidr -> LinkAddress(InetAddress.getByName(cidr.ip), cidr.prefix).toString() } }.toSet()
+                        .map { address -> parseCIDR(address).let { cidr -> "${InetAddress.getByName(cidr.ip).hostAddress}/${cidr.prefix}" } }.toSet()
                     val expected = VpnLinkCommit(name, addresses, requiredRoutes)
                     val connectivity = getSystemService(ConnectivityManager::class.java)
                         ?: error("ET_CONNECTIVITY_UNAVAILABLE")
@@ -288,7 +287,7 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
                                 val link = connectivity.getLinkProperties(network)
                                 link != null && capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true &&
                                     expected.matches(link.interfaceName,
-                                        link.linkAddresses.map { address -> address.toString() }.toSet(),
+                                        link.linkAddresses.map { address -> "${address.address.hostAddress}/${address.prefixLength}" }.toSet(),
                                         link.routes.filter { route -> route.type == RouteInfo.RTN_UNICAST }
                                             .map { route -> route.destination.toString() }.toSet())
                             }
