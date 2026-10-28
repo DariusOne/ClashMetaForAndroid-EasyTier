@@ -78,8 +78,8 @@ phone and forwards only to a local disposable native peer; no USB reverse mappin
 was present. Bidirectional TCP/UDP/ICMP and 4096-byte ICMP passed 5/5 each. Nonmesh
 LAN TCP/UDP passed 5/5; REJECT accepted zero connections. Direct/Global/Rule
 semantics and independent mesh routing all passed. Global UDP rejection also
-accepted no traffic at the test origin. These fixtures prove direct/reject parity;
-a real nonmesh proxy exit and bypass-private toggles still need their own rows.
+accepted no traffic at the test origin. That fixture proved direct/reject parity;
+the controlled proxy/bypass rows were subsequently tested as recorded below.
 
 Generic IPv4 discovery probes passed 5/5 in BOTH directions for the disposable
 mesh's directed broadcast, limited broadcast, `224.0.0.251` and `239.255.255.250`.
@@ -99,7 +99,23 @@ connectivity is claimed. Wi-Fi was restored; the test VPN, profile, probes and
 private Docker/LAN helpers were cleaned up. The Linux race tests also verify
 withdrawal retention, stale replacement rejection, FD cleanup and overlap scope.
 
-Physical baseline-app, DNS/Fake-IP, HTTP/SOCKS, IPv6, native UDP/STUN/QUIC outer
+The APK `08a63b95c69be6000b50d6f4da8125dd64821c95` passed the physical controlled
+SOCKS and bypass-private fixture. With bypass off, unmanaged private TCP/UDP used
+the authenticated SOCKS path 5/5 and made zero direct-origin connections. With
+bypass on, both used direct 5/5 without increasing proxy counters. Turning bypass
+off restored the proxy path 5/5; managed mesh TCP remained 5/5 in both settings.
+The fixture is a fixed-destination synthetic echo service, not an arbitrary
+forwarding proxy, a public proxy-exit test, or an original-CMFA app comparison.
+
+An earlier retry correctly failed: the fixture's eight-client semaphore rejected
+the second phase because five first-phase UDP associations remained open in the
+normal Mihomo NAT table. The failure evidence is retained. A loopback regression
+reproduces the eight-client limit and checks ten retained UDP sessions plus TCP
+with a finite sixteen-client limit. The complete physical rerun passed with peak
+ten active clients and zero capacity rejections. The APK/routing code was unchanged
+between these attempts. All temporary phone and host resources were cleaned up.
+
+Physical baseline-app, DNS/Fake-IP, HTTP/SOCKS inbounds, IPv6, native UDP/STUN/QUIC outer
 transports, cellular peer connectivity, DHCP/published-route rebuilds and sustained
 run rows remain unpassed.
 Gate C is intentionally not rolled out.

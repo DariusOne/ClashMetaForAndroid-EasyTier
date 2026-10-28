@@ -69,6 +69,8 @@ jobs:
         run: |
           python3 scripts/test_prepare_mihomo.py
           python3 scripts/prepare-mihomo.py
+      - name: Bounded physical SOCKS fixture regression
+        run: python3 scripts/test_physical_socks_peer.py
       - name: Real TCP and UDP through the Mihomo packet adapter
         working-directory: core/src/main/golang
         env:

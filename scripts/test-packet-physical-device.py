@@ -362,11 +362,11 @@ def main():
                 def proxy_probe(direct):
                     for protocol in ('tcp','udp'):
                         before=proxy_counts()
-                        out=adb('shell','/data/local/tmp/cmfa-physical-probe',protocol+'-client',proxy['destination'],str(proxy['destination_port']),timeout=60)
+                        out=adb('shell','/data/local/tmp/cmfa-physical-probe',protocol+'-client',proxy['destination'],str(proxy['destination_port']),timeout=60,check=False)
                         after=proxy_counts()
                         selected=('direct_'+protocol) if direct else protocol
                         other=protocol if direct else ('direct_'+protocol)
-                        if 'PASS 5/5' not in out.stdout or after[selected]-before[selected]!=5 or after[other]!=before[other]:
+                        if out.returncode or 'PASS 5/5' not in out.stdout or after[selected]-before[selected]!=5 or after[other]!=before[other]:
                             raise RuntimeError('Nonmesh proxy/direct path mismatch: '+protocol)
                 proxy_probe(False)
                 result['checks']['nonmesh_socks_proxy']={'tcp':'5/5','udp':'5/5','direct_origin_connections':0,'authentication_required':True}
@@ -386,6 +386,10 @@ def main():
                         raise RuntimeError('Private-network bypass lost mesh ownership')
                     result['checks']['bypass_private_'+str(bypass).lower()]={'nonmesh_expected':'direct' if bypass else 'authenticated-proxy','tcp':'5/5','udp':'5/5','mesh_tcp':'5/5'}
                     print('bypass-private '+str(bypass)+': original nonmesh path and mesh capture passed',flush=True)
+                counts=proxy_counts()
+                if counts.get('capacity_rejections',0):
+                    raise RuntimeError('Controlled proxy fixture exhausted its capacity')
+                result['checks']['proxy_fixture_capacity']={'peak_active':counts.get('peak_active'),'capacity_rejections':0}
             stage('peer-result.json', b'{"passed":true}')
             instrumentation.wait(timeout=45)
         log.flush()

@@ -72,16 +72,17 @@ is available in `native/easytier-upstream/easytier/LICENSE`.
 1. Actual Wi-Fi TCP outer transport now passes the physical fixture. Audit and
    validate native UDP/STUN/QUIC/DNS transports too; this TCP result is not blanket
    evidence for every native transport or network-switch recovery.
-2. Validate experimental interface replacement on Android and real network
-   transitions. Forced rebuild tests are not Wi-Fi/cellular transport tests;
-   IPv4 virtual source/MTU already pass on the prior physical APK.
+2. Interface replacement and three actual Wi-Fi disable/return cycles have passed
+   on Android. Complete DHCP/published-route changes and cellular peer tests;
+   recovery to a Wi-Fi-only peer is not cellular mesh transport evidence.
 3. Route HTTP/SOCKS and post-Fake-IP/resolution flows through the same ownership
    policy. A raw destination classifier alone does not cover these flows.
 4. Physical IPv4 TCP/UDP/ICMP, 4096-byte ICMP and generic broadcast/multicast packet
    probes pass in both directions. Compare discovery against standalone Android
    EasyTier and complete IPv6/multi-peer tests; no all-games claim follows from echo.
-5. Validate nonmesh Rule/Global/Direct, DNS and bypass-private parity, conflict
-   prompts, failures, network switches, sleep and restart cleanup.
+5. Nonmesh Rule/Global/Direct, controlled authenticated SOCKS and bypass-private
+   off/on/off cases pass on the physical prototype. Complete the original-app
+   baseline, public proxy exit, DNS, conflict prompts, sleep and sustained runs.
 
 Only after these pass: complete independent YAML/TOML profile UI, mode selection,
 status/overlap controls and mobile generator artifacts. No VPS, Cloudflare,

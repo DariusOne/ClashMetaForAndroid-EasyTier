@@ -16,6 +16,27 @@ import struct
 import threading
 import time
 
+# The two proxy phases each leave five UDP associations alive in Mihomo's
+# original NAT table. Eight slots incorrectly reject the second phase. Keep a
+# finite bound with room for all ten associations and the sequential TCP probe.
+MAX_CLIENTS = 16
+
+
+def bind_echo_sockets(host):
+    # Windows may allocate a TCP ephemeral port that is excluded for UDP.
+    # Reserve both protocols together and close both on every failed attempt.
+    for _ in range(16):
+        tcp=socket.socket()
+        udp=socket.socket(type=socket.SOCK_DGRAM)
+        try:
+            udp.bind((host,0))
+            tcp.bind((host,udp.getsockname()[1]))
+            tcp.listen(8)
+            return tcp,udp
+        except OSError:
+            tcp.close();udp.close()
+    raise RuntimeError('Fixture TCP/UDP port allocation failed')
+
 
 def main():
     parser=argparse.ArgumentParser()
@@ -26,25 +47,28 @@ def main():
     for v in (args.bind,args.phone):
         a=ipaddress.IPv4Address(v)
         if not a.is_private or a.is_loopback or a.is_unspecified: parser.error('Explicit private addresses required')
+    serve_fixture(args)
+
+
+def serve_fixture(args):
+    """Serve the bounded fixture; tests call this with loopback-only sockets."""
     root=args.directory.resolve(strict=True)
     username,password=secrets.token_hex(8),secrets.token_hex(16)
     destination=args.bind
-    direct_tcp=socket.socket()
-    direct_udp=socket.socket(type=socket.SOCK_DGRAM)
-    direct_tcp.bind((args.bind,0))
+    direct_tcp,direct_udp=bind_echo_sockets(args.bind)
     port=direct_tcp.getsockname()[1]
-    direct_udp.bind((args.bind,port))
-    direct_tcp.listen(8)
     direct_tcp.settimeout(.25);direct_udp.settimeout(.25)
     target=socket.inet_aton(destination)+struct.pack('!H',port)
     stop=threading.Event()
     lock=threading.Lock()
-    slots=threading.BoundedSemaphore(8)
+    slots=threading.BoundedSemaphore(MAX_CLIENTS)
     threads=[]
-    counts={'tcp':0,'udp':0,'authenticated':0,'direct_tcp':0,'direct_udp':0}
-    def record(key):
+    counts={'tcp':0,'udp':0,'authenticated':0,'direct_tcp':0,'direct_udp':0,
+            'active':0,'peak_active':0,'capacity_rejections':0}
+    def record(key,amount=1):
         with lock:
-            if key: counts[key]+=1
+            if key: counts[key]+=amount
+            counts['peak_active']=max(counts['peak_active'],counts['active'])
             pending=root/'proxy-counts.tmp'
             pending.write_text(json.dumps(counts),encoding='utf-8')
             pending.replace(root/'proxy-counts.json')
@@ -127,7 +151,7 @@ def main():
         except (OSError,EOFError,ValueError): pass
         finally:
             if udp: udp.close()
-            client.close();slots.release()
+            client.close();record('active',-1);slots.release()
     record(None)
     for listener,udp in [(direct_tcp,False),(direct_udp,True)]:
         t=threading.Thread(target=direct,args=(listener,udp),daemon=True);threads.append(t);t.start()
@@ -140,7 +164,11 @@ def main():
             while time.monotonic()<deadline and not (root/'stop').exists():
                 try: client,remote=listener.accept()
                 except socket.timeout: continue
-                if remote[0]!=args.phone or not slots.acquire(blocking=False): client.close();continue
+                if remote[0]!=args.phone: client.close();continue
+                if not slots.acquire(blocking=False):
+                    record('capacity_rejections');client.close();continue
+                record('active')
+                threads[:]=[t for t in threads if t.is_alive()]
                 t=threading.Thread(target=serve,args=(client,),daemon=True);threads.append(t);t.start()
         finally:
             stop.set()

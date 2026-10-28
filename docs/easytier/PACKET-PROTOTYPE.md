@@ -113,6 +113,16 @@ restores Wi-Fi even on failure. A private LAN peer cannot validate mesh traffic
 over cellular; do not label this as cellular peer acceptance. Neither option
 changes the original apps or desktop network settings.
 
+`--proxy-fixture` consumes private metadata from `physical_socks_peer.py`. That
+helper accepts only the selected phone, requires a fresh one-use SOCKS identity,
+and echoes one fixed synthetic target without forwarding arbitrary traffic.
+The test checks TCP/UDP 5/5 on the proxy, direct and restored-proxy paths while
+toggling only the disposable prototype's bypass-private setting. Mesh ownership
+must remain intact. The finite sixteen-client bound accommodates ten retained
+UDP associations; capacity rejections invalidate a run. Loopback regression covers
+the former eight-client failure, the complete two-phase workload and overflow.
+This does not validate public proxy exits or the combined HTTP/SOCKS inbound hook.
+
 To return this separate prototype to normal CMFA behavior, stop its VPN and
 remove only `no_backup/native-mesh-acceptance/enable` using run-as, or clear the
 prototype's app data. Neither action is needed for the user's original CMFA.
