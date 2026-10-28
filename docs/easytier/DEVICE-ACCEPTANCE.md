@@ -54,5 +54,17 @@ the last working configuration and fix/retest the failing path.
 
 ## Current status
 
-Gate A/B have not been executed for this custom build. ADB had no connected
-device during initial development. Gate C is intentionally not rolled out.
+The first physical arm64 Android 17 fixture was executed on 2026-10-28 using
+prototype commit `46f358e0dd3ed3288e31186567fba2224db5ff13` and a private,
+disposable Linux peer. Ten start/stop cycles and native-child crash isolation
+passed. A short TCP/UDP/ICMP fixture passed 5/5 in both directions, including
+verification of the phone's virtual source address. Its underlay used USB
+reverse, so this does not validate native Wi-Fi transport protection.
+
+The extended LAN fixture observed 4096-byte ICMP 5/5 each way, nonmesh TCP/UDP
+5/5 and zero accepted connections for its explicit REJECT rule. However, the
+VPN owner crashed during extended mode-switch runs. Android tombstones identify
+SIGABRT in `libclash.so` (`runtime.tgkill`), not a completed mode-parity pass.
+The failure is under investigation; isolated passing subcases do not pass Gate B.
+Physical baseline-app, discovery, DNS/Fake-IP, IPv6, network-switch and sustained
+run rows remain unpassed. Gate C is intentionally not rolled out.

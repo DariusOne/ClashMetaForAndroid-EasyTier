@@ -7,6 +7,7 @@ permission with appops, install packages, clear data, or read user profiles.
 The operator must restore the recorded pre-test VPN state after finishing.
 """
 import argparse
+import ipaddress
 import json
 from pathlib import Path
 import queue
@@ -30,9 +31,24 @@ def main():
     parser.add_argument('--probe', type=Path)
     parser.add_argument('--reverse-port', type=int, default=43179)
     parser.add_argument('--host-port', type=int)
+    parser.add_argument('--lan-fixture', type=Path)
     args = parser.parse_args()
     base = [args.adb, '-s', args.serial]
     root = args.test_root.resolve(strict=True)
+    lan = None
+    if args.lan_fixture:
+        if args.phase != 'peer':
+            parser.error('LAN fixture requires the peer phase')
+        args.lan_fixture = args.lan_fixture.resolve(strict=True)
+        lan = json.loads((args.lan_fixture/'lan-ready.json').read_text(encoding='utf-8'))
+        for key in ('host', 'phone'):
+            address = ipaddress.IPv4Address(lan[key])
+            if not address.is_private or address.is_loopback or address.is_unspecified:
+                parser.error('Invalid LAN fixture address')
+        if set(lan['ports']) != {'tcp','udp','reject'} or not all(type(p) is int and 1024 <= p <= 65535 for p in lan['ports'].values()):
+            parser.error('Invalid LAN fixture ports')
+        if len(set(lan['ports'].values())) != 3:
+            parser.error('LAN fixture ports must differ')
     def call(*command, timeout=30, check=True):
         return subprocess.run(list(command), capture_output=True, encoding='utf-8', errors='replace', timeout=timeout, check=check)
     def adb(*command, **kwargs):
@@ -56,7 +72,8 @@ def main():
     stage('physical-consent', token.encode())
     result = {'kind':'physical-android-native-packet-fixture', 'phase':args.phase, 'passed':False,
               'complete_integration':False, 'dns_fakeip_validated':False, 'discovery_validated':False,
-              'ipv6_validated':False, 'physical_transport':'USB reverse to isolated Linux native peer', 'checks':{}}
+              'ipv6_validated':False, 'ipv4_large_packet_validated':False,
+              'physical_transport':'USB reverse to isolated Linux native peer', 'checks':{}}
     instrumentation = None
     helpers = []
     reverse_created = False
@@ -76,10 +93,22 @@ def main():
             adb('shell', 'chmod', '700', '/data/local/tmp/cmfa-physical-probe')
             stage('mesh.toml', (root/'phone.toml').read_bytes())
             stage('ci-peer-guard', b'disposable-physical-only')
-            stage('ci-reject-port', b'30103')
+            stage('ci-reject-port', str(lan['ports']['reject'] if lan else 30103).encode())
         test = 'NativeMeshSmokeTest' if args.phase == 'lifecycle' else 'NativeMeshPeerTest'
-        adb('shell', 'am', 'start', '-W', '-n', PACKAGE+'/com.github.kr328.clash.MainActivity')
         instrumentation = subprocess.Popen(base + ['shell','am','instrument','-w','-r','-e','physicalDeviceConsent',token,'-e','class','com.github.kr328.clash.'+test,PACKAGE+'.test/androidx.test.runner.AndroidJUnitRunner'], stdout=log, stderr=subprocess.STDOUT)
+        # Instrumentation restarts its target. Opening the Activity before that
+        # restart can leave a physical phone on its launcher. Wait for the test
+        # start event, then open only our prototype's normal Activity.
+        launch_deadline = time.monotonic()+20
+        while time.monotonic()<launch_deadline:
+            if instrumentation.poll() is not None:
+                raise RuntimeError('Physical instrumentation exited before foreground launch')
+            if 'INSTRUMENTATION_STATUS_CODE: 1' in (root/(args.phase+'-instrumentation.txt')).read_text(encoding='utf-8'):
+                break
+            time.sleep(.1)
+        else:
+            raise RuntimeError('Physical instrumentation did not start')
+        adb('shell','am','start','-W','-n',PACKAGE+'/com.github.kr328.clash.MainActivity')
         print('Waiting for prototype test; approve Android VPN prompt on the phone if shown.', flush=True)
         if args.phase == 'lifecycle':
             instrumentation.wait(timeout=420)
@@ -129,6 +158,65 @@ def main():
                 if not re.search(r'5 (?:packets )?received',output): raise RuntimeError('Physical ICMP assertion failed: '+direction)
                 result['checks'][direction+'_icmp']={'passed':5,'expected':5}
                 print('ICMP '+direction+': 5/5',flush=True)
+            # 4096 bytes exceeds both virtual interface MTUs. Check intact
+            # ICMP payload delivery in both directions, not merely tiny echo.
+            for direction, command in [
+                ('outbound',lambda:adb('shell','ping','-c','5','-W','2','-s','4096','10.126.0.1',timeout=30)),
+                ('inbound',lambda:docker('ping','-c','5','-W','2','-s','4096','10.126.0.2',timeout=30)),
+            ]:
+                output=command().stdout
+                if not re.search(r'5 (?:packets )?received',output):
+                    raise RuntimeError('Physical large ICMP assertion failed: '+direction)
+                result['checks'][direction+'_icmp_4096']={'passed':5,'expected':5,'payload_bytes':4096}
+                print('4096-byte ICMP '+direction+': 5/5',flush=True)
+            result['ipv4_large_packet_validated']=True
+            if lan:
+                def lan_counters():
+                    return json.loads((args.lan_fixture/'lan-counts.json').read_text(encoding='utf-8'))
+                def lan_probe(kind, allowed):
+                    before = len(lan_counters()[kind])
+                    protocol = 'udp' if kind == 'udp' else 'tcp'
+                    probe = adb('shell','/data/local/tmp/cmfa-physical-probe',protocol+'-client',lan['host'],str(lan['ports'][kind]),check=False,timeout=45)
+                    sources = lan_counters()[kind][before:]
+                    if allowed:
+                        if probe.returncode or 'PASS 5/5' not in probe.stdout or sources != [lan['phone']]*5:
+                            raise RuntimeError('Physical nonmesh direct assertion failed: '+kind)
+                    elif probe.returncode == 0 or sources:
+                        raise RuntimeError('Physical nonmesh rejection assertion failed: '+kind)
+                lan_probe('tcp', True)
+                lan_probe('udp', True)
+                lan_probe('reject', False)
+                result['checks']['nonmesh_rule']={'tcp':'5/5','udp':'5/5','reject_accepted_connections':0}
+                for sequence, mode in enumerate(('direct','global','rule'),1):
+                    stage('mode-request.json',json.dumps({'sequence':sequence,'mode':mode}).encode())
+                    deadline = time.monotonic()+20
+                    while time.monotonic()<deadline:
+                        try: ready_sequence=json.loads(read('mode-ready.json')).get('sequence')
+                        except (ValueError,AttributeError): ready_sequence=None
+                        if ready_sequence==sequence: break
+                        time.sleep(.2)
+                    else: raise RuntimeError('Physical CMFA mode did not apply: '+mode)
+                    before=len(counters()['tcp'])
+                    probe=adb('shell','/data/local/tmp/cmfa-physical-probe','tcp-client','10.126.0.1','30101',timeout=60,check=False)
+                    if probe.returncode or 'PASS 5/5' not in probe.stdout or counters()['tcp'][before:] != ['10.126.0.2']*5:
+                        result['checks']['failed_mode_probe']={
+                            'mode':mode,'exit_code':probe.returncode,
+                            'probe_codes':re.findall(r'\b[A-Z][A-Z_]{3,}\b',probe.stderr),
+                            'peer_accepted_connections':len(counters()['tcp'])-before,
+                        }
+                        diagnostics = {
+                            'status':read('status.json'),
+                            'route_to_test_peer':adb('shell','ip','-4','route','get','10.126.0.1',check=False).stdout,
+                            'underlay_test_sockets':docker('ss','-tnp',check=False).stdout,
+                        }
+                        vpn=adb('shell','dumpsys','vpn_management',check=False).stdout
+                        diagnostics['vpn_owners']=[line.strip() for line in vpn.splitlines() if 'Active package name:' in line or 'Active vpn type:' in line]
+                        (root/'failed-mode-diagnostics.json').write_text(json.dumps(diagnostics,indent=2)+'\n',encoding='utf-8')
+                        raise RuntimeError('Physical mesh path changed with CMFA mode: '+mode)
+                    lan_probe('reject',mode=='direct')
+                    if mode=='global': lan_probe('udp',False)
+                    result['checks']['mode_'+mode]={'mesh_tcp':'5/5','nonmesh_expected':'direct' if mode=='direct' else 'reject','passed':True}
+                    print('Nonmesh '+mode+' semantics and independent mesh path: passed',flush=True)
             stage('peer-result.json', b'{"passed":true}')
             instrumentation.wait(timeout=45)
         log.flush()
@@ -145,6 +233,14 @@ def main():
         if type(error) is RuntimeError: result['failure']=str(error)
         raise
     finally:
+        if not result['passed']:
+            try:
+                crash=adb('shell','run-as',PACKAGE,'dd','if=files/clash/native-mesh-crash.txt','bs=65536','count=64',check=False,timeout=15).stdout
+                if crash:
+                    (root/(args.phase+'-go-crash-private.txt')).write_text(crash,encoding='utf-8')
+                    result['private_crash_saved']=True
+            except Exception:
+                result['private_crash_unavailable']=True
         if args.phase=='peer' and instrumentation and instrumentation.poll() is None:
             try: stage('peer-result.json', b'{"passed":false}'); instrumentation.wait(timeout=20)
             except Exception: pass
@@ -167,6 +263,9 @@ def main():
         if reverse_created:
             try: adb('reverse','--remove',f'tcp:{args.reverse_port}',check=False,timeout=15)
             except Exception: cleanup_errors.append('usb_reverse_removal_unconfirmed')
+        if args.phase=='peer':
+            try: adb('shell','rm','-f','/data/local/tmp/cmfa-physical-probe',timeout=15)
+            except Exception: cleanup_errors.append('test_probe_removal_unconfirmed')
         log.close()
         result['cleanup_errors']=cleanup_errors
         (root/(args.phase+'-result.json')).write_text(json.dumps(result,indent=2)+'\n',encoding='utf-8')

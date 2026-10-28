@@ -5,6 +5,9 @@ import "C"
 
 import (
 	"net/netip"
+	"os"
+	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -12,6 +15,7 @@ import (
 	"cfa/native/app"
 	"cfa/native/tun"
 	router "github.com/DariusOne/ClashMetaForAndroid-EasyTier/native/packet-router"
+	"github.com/metacubex/mihomo/constant"
 	"github.com/metacubex/mihomo/tunnel"
 	"golang.org/x/sync/semaphore"
 )
@@ -37,6 +41,14 @@ func startPacketTun(fd, meshFD C.int, configJSON C.c_string, callback unsafe.Poi
 		return 1
 	}
 	app.ApplyTunContext(remote.markSocket, remote.querySocketUid)
+	// This entry point is used only by the opt-in packet harness. Android can
+	// discard Go's stderr, leaving only runtime.tgkill in a native tombstone.
+	// Preserve crash diagnostics privately for explicitly staged fixture runs;
+	// normal CMFA startup does not enable this capture.
+	if file, err := os.OpenFile(filepath.Join(constant.Path.HomeDir(), "native-mesh-crash.txt"), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600); err == nil {
+		_ = debug.SetCrashOutput(file, debug.CrashOptions{})
+		_ = file.Close() // SetCrashOutput owns a duplicate descriptor.
+	}
 	h, err := tun.StartPacketSession(int(fd), int(meshFD), c, tunnel.Tunnel)
 	if err != nil {
 		remote.close()
