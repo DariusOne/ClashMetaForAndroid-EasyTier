@@ -27,6 +27,7 @@ import com.github.kr328.clash.service.util.sendClashStarted
 import com.github.kr328.clash.service.util.sendClashStopped
 import kotlinx.coroutines.*
 import kotlinx.coroutines.selects.select
+import java.net.InetAddress
 
 class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.Default) {
     private val self: TunService
@@ -149,7 +150,7 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
             val requiredRoutes = linkedSetOf<String>()
             fun route(address: String, bits: Int) {
                 addRoute(address, bits)
-                requiredRoutes.add(IpPrefix("$address/$bits").toString())
+                requiredRoutes.add(IpPrefix(InetAddress.getByName(address), bits).toString())
             }
             // Interface address
             // The mesh address is first so native packets use the phone's mesh
@@ -271,7 +272,7 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
                     val addresses = (meshAddresses.map { address -> address.cidr } +
                         "$TUN_GATEWAY/$TUN_SUBNET_PREFIX" +
                         if (store.allowIpv6) listOf("$TUN_GATEWAY6/$TUN_SUBNET_PREFIX6") else emptyList())
-                        .map { address -> LinkAddress(address).toString() }.toSet()
+                        .map { address -> parseCIDR(address).let { cidr -> LinkAddress(InetAddress.getByName(cidr.ip), cidr.prefix).toString() } }.toSet()
                     val expected = VpnLinkCommit(name, addresses, requiredRoutes)
                     val connectivity = getSystemService(ConnectivityManager::class.java)
                         ?: error("ET_CONNECTIVITY_UNAVAILABLE")
