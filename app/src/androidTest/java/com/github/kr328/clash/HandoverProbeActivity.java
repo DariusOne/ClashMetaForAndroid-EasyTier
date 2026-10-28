@@ -100,7 +100,7 @@ public final class HandoverProbeActivity extends Activity {
             catch (ErrnoException e) {
                 if (e.errno != OsConstants.EINPROGRESS) throw e;
                 waitOs(fd, (short)OsConstants.POLLOUT, deadline);
-                if (Os.getsockoptInt(fd, OsConstants.SOL_SOCKET, OsConstants.SO_ERROR) != 0)
+                if (!target.equals(Os.getpeername(fd)))
                     throw new IOException("CONNECT_FAILED");
             }
             counts.source((InetSocketAddress)Os.getsockname(fd));
