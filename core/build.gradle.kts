@@ -12,6 +12,15 @@ plugins {
 
 val golangSource = file("src/main/golang/native")
 
+// Keep the upstream submodule pinned. A hash-checked local compatibility fix
+// consumes buffers on REJECT writes; debug leak checks remain enabled.
+val prepareMihomo = tasks.register<Exec>("prepareMihomo") {
+    workingDir(rootProject.projectDir)
+    val python = providers.gradleProperty("pythonExecutable").orNull
+        ?: if (System.getProperty("os.name").startsWith("Windows")) "python" else "python3"
+    commandLine(python, rootProject.file("scripts/prepare-mihomo.py"))
+}
+
 golang {
     sourceSets {
         create("alpha") {
@@ -62,6 +71,7 @@ dependencies {
 
 afterEvaluate {
     tasks.withType(GolangBuildTask::class.java).forEach {
+        it.dependsOn(prepareMihomo)
         it.inputs.dir(golangSource)
         it.inputs.dir(rootProject.file("native/packet-router"))
     }

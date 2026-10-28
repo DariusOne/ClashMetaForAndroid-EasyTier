@@ -65,6 +65,11 @@ The extended LAN fixture observed 4096-byte ICMP 5/5 each way, nonmesh TCP/UDP
 5/5 and zero accepted connections for its explicit REJECT rule. However, the
 VPN owner crashed during extended mode-switch runs. Android tombstones identify
 SIGABRT in `libclash.so` (`runtime.tgkill`), not a completed mode-parity pass.
-The failure is under investigation; isolated passing subcases do not pass Gate B.
+Private Go crash capture identified `panic: leaking buffer`. The pinned Mihomo
+REJECT and REJECT-DROP writers failed to release the buffer on EOF. A local debug
+regression reproduced both panics before the fix and passed after both releases
+were added; the original EOF/rejection behavior is retained. The build prepares
+this compatibility fix using a complete source hash check. The fixed APK still
+requires the extended physical rerun; isolated passing subcases do not pass Gate B.
 Physical baseline-app, discovery, DNS/Fake-IP, IPv6, network-switch and sustained
 run rows remain unpassed. Gate C is intentionally not rolled out.

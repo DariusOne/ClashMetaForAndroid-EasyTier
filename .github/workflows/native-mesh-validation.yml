@@ -65,11 +65,15 @@ jobs:
           echo "c1278af2579c9398cf22c638686e5348926b160eda784930d416d95aaa7a9221  $RUNNER_TEMP/go.tar.gz" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/go.tar.gz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/go/bin" >> "$GITHUB_PATH"
+      - name: Apply hash-checked Mihomo ownership fix
+        run: |
+          python3 scripts/test_prepare_mihomo.py
+          python3 scripts/prepare-mihomo.py
       - name: Real TCP and UDP through the Mihomo packet adapter
         working-directory: core/src/main/golang
         env:
           CGO_ENABLED: '1'
-        run: go test -mod=readonly -race -tags 'with_gvisor,cmfa' -count=1 -timeout 90s ./native/tun
+        run: go test -mod=readonly -race -tags 'foss,with_gvisor,cmfa,debug' -count=1 -timeout 90s ./native/tun ./native/compat
   native-engine:
     needs: changed-components
     if: needs.changed-components.outputs.native == 'true'

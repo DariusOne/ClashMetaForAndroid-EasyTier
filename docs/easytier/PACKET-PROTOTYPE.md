@@ -9,6 +9,13 @@ python3 scripts/build-easytier-android.py --abi x86_64
 ./gradlew -PnativeMeshHarness=true app:assembleMetaDebug
 ```
 
+Gradle runs `scripts/prepare-mihomo.py` before compiling Go. This applies two
+reviewed buffer releases to the pinned Mihomo `reject.go`, verifies the complete
+source digest, and fails on unrelated upstream edits. It does not upgrade the
+submodule or alter the Go module cache. Direct Go test users must run that script
+first. The `native/compat` regression runs with `debug` enabled: rejected writes
+must consume their buffer and retain EOF semantics without panicking.
+
 The package is **com.github.metacubex.clash.meshprototype.meta**, different from
 working CMFA. It has one VpnService and a separate, unexported native engine
 process. Its native JNI libraries are verified before packaging. Compile success

@@ -46,6 +46,7 @@ func startPacketTun(fd, meshFD C.int, configJSON C.c_string, callback unsafe.Poi
 	// Preserve crash diagnostics privately for explicitly staged fixture runs;
 	// normal CMFA startup does not enable this capture.
 	if file, err := os.OpenFile(filepath.Join(constant.Path.HomeDir(), "native-mesh-crash.txt"), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600); err == nil {
+		debug.SetTraceback("system")
 		_ = debug.SetCrashOutput(file, debug.CrashOptions{})
 		_ = file.Close() // SetCrashOutput owns a duplicate descriptor.
 	}
