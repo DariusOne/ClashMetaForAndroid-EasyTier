@@ -89,6 +89,17 @@ parity against the original Android EasyTier application's discovery baseline.
 That baseline comparison remains open; the result's full `discovery_validated`
 flag deliberately remains false independently of the passing IPv4 packet probes.
 
+The subsequent APK (`830248f10b3456540efb5343590cb48faaceaa07`) passed the same
+Wi-Fi/IPv4/mode/discovery fixture, plus three forced Android interface rebuilds
+and three actual Wi-Fi disable/return cycles. Every cycle retained the same native
+generation, verified outgoing TCP/UDP 5/5 and reverse ICMP 5/5, and rechecked
+nonmesh LAN DIRECT/REJECT. The private peer was reachable only on Wi-Fi. Although
+the phone had a physical network during each interruption, no cellular mesh
+connectivity is claimed. Wi-Fi was restored; the test VPN, profile, probes and
+private Docker/LAN helpers were cleaned up. The Linux race tests also verify
+withdrawal retention, stale replacement rejection, FD cleanup and overlap scope.
+
 Physical baseline-app, DNS/Fake-IP, HTTP/SOCKS, IPv6, native UDP/STUN/QUIC outer
-transports, network-switch recovery and sustained-run rows remain unpassed.
+transports, cellular peer connectivity, DHCP/published-route rebuilds and sustained
+run rows remain unpassed.
 Gate C is intentionally not rolled out.

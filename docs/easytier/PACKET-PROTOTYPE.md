@@ -52,14 +52,17 @@ datagram endpoints; only the router reads the Android TUN.
 
 An independent phone instance ID is generated under no-backup app storage.
 Native commands have a watchdog confined to the native service process. Death or
-invalid snapshots closes mesh traffic, with no redirect to Clash. Changes that
-require rebuilding the Android interface currently stop mesh traffic with the
-fixed `ET_INTERFACE_REBUILD_REQUIRED` message; automatic recovery is unfinished.
+invalid snapshots closes mesh traffic, with no redirect to Clash. Physical-network,
+address and route-capture changes rebuild the Android interface while retaining
+the native instance and route ownership. The reader pauses before establish and
+resumes only after the new interface and policy acknowledge the same snapshot.
+Offline periods keep the VPN established and close mesh traffic. A failed rebuild
+stays closed. This is still the opt-in harness, not production mode/profile UI.
 
 The prototype currently supports raw-IP packet-path investigation only. In
 particular, the post-resolution DNS/Fake-IP and HTTP/SOCKS hook is NOT connected.
-No production combined-mode, proxy-only/mesh-only switching, profile editor,
-automatic network-switch recovery or generator release is claimed. Keep these
+No production combined-mode, proxy-only/mesh-only switching, profile editor
+or generator release is claimed. Keep these
 rows unpassed in DEVICE-ACCEPTANCE.md. Do not distribute this artifact as a
 completed CMFA/EasyTier replacement.
 
@@ -100,6 +103,15 @@ UDP packet tests, not game/mDNS/SSDP protocol tests or a standalone-app comparis
 The runner records `generic_ipv4_discovery_validated` separately and removes its
 temporary probe executables. Test evidence must name the exact APK commit and
 local fixture revision; an unexecuted fixture is not acceptance evidence.
+
+`--rebuild-cycles 3` requests three real Android interface replacements using a
+private fixture file. Each must retain the native generation and recover TCP,
+UDP and reverse ICMP. `--wifi-return-cycles 3` is a separate, explicitly selected
+physical test: with Wi-Fi already on, temporarily disable it, observe the network
+change, enable it again and verify the same packet paths. Its finally block
+restores Wi-Fi even on failure. A private LAN peer cannot validate mesh traffic
+over cellular; do not label this as cellular peer acceptance. Neither option
+changes the original apps or desktop network settings.
 
 To return this separate prototype to normal CMFA behavior, stop its VPN and
 remove only `no_backup/native-mesh-acceptance/enable` using run-as, or clear the

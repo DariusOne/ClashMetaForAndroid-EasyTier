@@ -36,6 +36,7 @@ def main():
     parser.add_argument('--native-lan-fixture', type=Path)
     parser.add_argument('--discovery-probes-dir', type=Path)
     parser.add_argument('--rebuild-cycles', type=int, choices=range(0,4), default=0)
+    parser.add_argument('--wifi-return-cycles', type=int, choices=range(0,4), default=0)
     args = parser.parse_args()
     base = [args.adb, '-s', args.serial]
     root = args.test_root.resolve(strict=True)
@@ -53,6 +54,8 @@ def main():
         profile = tomllib.loads((root/'phone.toml').read_text(encoding='utf-8'))
         if profile.get('peer') != [{'uri':f"tcp://{native_lan['host']}:{native_lan['port']}"}]:
             parser.error('Disposable profile does not match selected LAN fixture')
+    if args.wifi_return_cycles and not native_lan:
+        parser.error('Wi-Fi interruption tests require the private native LAN fixture')
     if args.lan_fixture:
         if args.phase != 'peer':
             parser.error('LAN fixture requires the peer phase')
@@ -96,6 +99,7 @@ def main():
     helpers = []
     reverse_created = False
     discovery_staged = False
+    restore_wifi = False
     log = (root / (args.phase + '-instrumentation.txt')).open('w', encoding='utf-8')
     try:
         if args.phase == 'peer':
@@ -300,6 +304,45 @@ def main():
                 rebuilds.append({'cycle':sequence,'outbound_tcp':'5/5','outbound_udp':'5/5','inbound_icmp':'5/5','session_preserved':True})
                 result['checks']['interface_rebuilds']=rebuilds
                 print('Android interface rebuild '+str(sequence)+': TCP/UDP/ICMP 5/5; same mesh session',flush=True)
+            if args.wifi_return_cycles:
+                if adb('shell','settings','get','global','wifi_on').stdout.strip()!='1':
+                    raise RuntimeError('Wi-Fi must already be enabled before the explicit interruption fixture')
+                cycles=[]
+                for cycle in range(1,args.wifi_return_cycles+1):
+                    original=json.loads(read('status.json'))
+                    restore_wifi=True
+                    adb('shell','svc','wifi','disable')
+                    deadline=time.monotonic()+25
+                    while time.monotonic()<deadline:
+                        state=json.loads(read('status.json'))
+                        if state.get('stage')=='waiting-network' or state.get('interface_revision',0)>original['interface_revision']: break
+                        if state.get('stage','').startswith('ET_'): raise RuntimeError('Network interruption failed closed permanently')
+                        time.sleep(.3)
+                    else: raise RuntimeError('Physical network loss was not observed')
+                    disconnected=state.get('stage')
+                    adb('shell','svc','wifi','enable')
+                    # Readiness probes do not count toward the strict 5/5 below.
+                    deadline=time.monotonic()+75
+                    while time.monotonic()<deadline:
+                        state=json.loads(read('status.json'))
+                        if state.get('stage','').startswith('ET_'): raise RuntimeError('Network return failed permanently')
+                        if state.get('stage')=='active' and state.get('interface_revision',0)>original['interface_revision']:
+                            ready=adb('shell','ping','-c','1','-W','1','10.126.0.1',check=False,timeout=5)
+                            if ready.returncode==0: break
+                        time.sleep(.5)
+                    else: raise RuntimeError('Mesh did not recover after Wi-Fi return')
+                    if state['generation']!=original['generation']: raise RuntimeError('Network return changed mesh identity/session')
+                    for protocol,port in [('tcp',30101),('udp',30102)]:
+                        before=len(counters()[protocol])
+                        probe=adb('shell','/data/local/tmp/cmfa-physical-probe',protocol+'-client','10.126.0.1',str(port),timeout=60)
+                        if 'PASS 5/5' not in probe.stdout or counters()[protocol][before:]!=['10.126.0.2']*5:
+                            raise RuntimeError('Mesh packets failed after Wi-Fi return')
+                    probe=docker('ping','-c','5','-W','2','10.126.0.2',timeout=30)
+                    if not re.search(r'5 (?:packets )?received',probe.stdout): raise RuntimeError('Inbound Wi-Fi recovery failed')
+                    if lan: lan_probe('tcp',True); lan_probe('reject',False)
+                    cycles.append({'cycle':cycle,'observed_disconnect_stage':disconnected,'outbound_tcp':'5/5','outbound_udp':'5/5','inbound_icmp':'5/5','session_preserved':True,'cellular_mesh_transport_validated':False})
+                    result['checks']['wifi_return_cycles']=cycles
+                    print('Wi-Fi interruption/return '+str(cycle)+': TCP/UDP/ICMP 5/5; same mesh session',flush=True)
             stage('peer-result.json', b'{"passed":true}')
             instrumentation.wait(timeout=45)
         log.flush()
@@ -328,6 +371,12 @@ def main():
             try: stage('peer-result.json', b'{"passed":false}'); instrumentation.wait(timeout=20)
             except Exception: pass
         cleanup_errors=[]
+        if restore_wifi:
+            try:
+                adb('shell','svc','wifi','enable',timeout=15)
+                result['wifi_enabled_restored']=adb('shell','settings','get','global','wifi_on').stdout.strip()=='1'
+                if not result['wifi_enabled_restored']: cleanup_errors.append('wifi_restore_unconfirmed')
+            except Exception: cleanup_errors.append('wifi_restore_unconfirmed')
         try: adb('shell','am','force-stop',PACKAGE,check=False,timeout=15)
         except Exception: cleanup_errors.append('prototype_stop_unconfirmed')
         if instrumentation and instrumentation.poll() is None:

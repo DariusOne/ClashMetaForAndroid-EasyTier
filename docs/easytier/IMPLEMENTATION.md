@@ -58,7 +58,9 @@ is available in `native/easytier-upstream/easytier/LICENSE`.
   stale packets cannot tear down the dispatcher during replacement. Address,
   route-capture and physical-network changes trigger a rebuild; offline periods
   retain the VPN and close mesh ownership. Withdrawn routes remain captured and
-  closed. Physical recovery validation for this addition is still pending.
+  closed. Three forced rebuilds and three Wi-Fi disconnect/return cycles pass on
+  physical Android 17 with one mesh generation. This does not prove cellular
+  peer connectivity, DHCP address changes or published-route growth on a phone.
 - Imported native flags are validated before upstream's infallible deserializer;
   invalid fields cannot intentionally abort the Java process. Host file sources,
   management portals, exit routes and phone gateway advertisements are rejected.
