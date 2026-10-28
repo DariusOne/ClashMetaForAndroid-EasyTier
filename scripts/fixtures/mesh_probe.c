@@ -69,8 +69,15 @@ int main(int argc, char **argv) {
         close(fd);
     } else {
         for (int i=0; i<5; i++) {
+            printf("CLIENT_ATTEMPT %d\n", i + 1); fflush(stdout);
             int fd = open_socket(udp);
             if (connect(fd, (void *)&target, sizeof(target))) fail("CONNECT_FAILED");
+            struct sockaddr_in local;
+            socklen_t local_length = sizeof(local);
+            if (getsockname(fd, (void *)&local, &local_length)) fail("SOURCE_QUERY_FAILED");
+            struct in_addr mesh_source;
+            inet_pton(AF_INET, "10.126.0.2", &mesh_source);
+            puts(local.sin_addr.s_addr == mesh_source.s_addr ? "SOURCE_MESH" : "SOURCE_OTHER"); fflush(stdout);
             char request[64], response[128];
             int length = snprintf(request, sizeof(request), "cmfa-native-packet-%d\n", i);
             send_all(fd, request, length);

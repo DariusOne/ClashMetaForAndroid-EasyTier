@@ -101,7 +101,7 @@ def main():
     result = {"kind": "disposable-emulator-real-native-peer", "passed": False,
               "real_device_validated": False, "complete_integration": False,
               "dns_fakeip_validated": False, "discovery_validated": False, "checks": {}}
-    peer = instrument = instrumentation = None
+    peer = instrument = instrumentation = capture = None
     helpers = []
     with tempfile.TemporaryDirectory(prefix="cmfa-native-peer-") as temp, ExitStack() as stack:
         temp = Path(temp)
@@ -144,6 +144,12 @@ def main():
                 time.sleep(0.2)
             else:
                 raise RuntimeError("Native peer interface not ready")
+            # Disposable CI only: capture headers on the synthetic mesh NIC,
+            # never the encrypted underlay, credentials or packet payloads.
+            # A finite packet count bounds this diagnostic even on test failure.
+            packet_log = stack.enter_context((report / "mesh-packet-headers.txt").open("w"))
+            capture = subprocess.Popen(["sudo", "-n", "tcpdump", "-n", "-l", "-tt", "-i", "ci-et-peer", "-c", "2000",
+                                        "net 10.126.0.0/24 and (tcp or udp)"], stdout=packet_log, stderr=subprocess.STDOUT, start_new_session=True)
             phone = f"ipv4='10.126.0.2/24'\ndhcp=false\nlisteners=[]\nstun_servers=[]\nstun_servers_v6=[]\n[[peer]]\nuri='tcp://10.0.2.2:{port}'\n" + identity + "[flags]\nmtu=1380\nenable_ipv6=false\ndisable_p2p=true\n"
             stage("mesh.toml", phone)
             stage("ci-peer-guard", "disposable-ci-only")
@@ -274,19 +280,24 @@ def main():
                 for mode in ("tcp", "udp"):
                     echo = Echo(mode == "udp")
                     stack.callback(echo.close)
-                    output = call("shell", "/data/local/tmp/cmfa-mesh-probe", mode + "-client", "10.126.0.1", str(echo.port), timeout=60)
+                    probe = subprocess.run(adb + ["shell", "/data/local/tmp/cmfa-mesh-probe", mode + "-client", "10.126.0.1", str(echo.port)],
+                                           capture_output=True, text=True, timeout=60)
+                    output = probe.stdout + probe.stderr
                     sources = list(echo.sources)
                     # Preserve bounded, credential-free diagnostics BEFORE the
                     # assertion. A later failure must not erase earlier cycles
                     # or conflate payload failure with incorrect source routing.
                     cycle["protocols"][mode] = {
+                        "returncode": probe.returncode,
+                        "fixture_port": echo.port,
+                        "probe_codes": [line for line in output.splitlines() if re.fullmatch(r"[A-Z_]+(?: [0-5])?", line)],
                         "payload_5_of_5": "PASS 5/5" in output,
                         "observed": len(sources),
                         "mesh_sources": sources.count("10.126.0.2"),
                         "clash_gateway_sources": sources.count("172.19.0.1"),
                         "other_sources": sum(ip not in ("10.126.0.2", "172.19.0.1") for ip in sources),
                     }
-                    if "PASS 5/5" not in output or sources != ["10.126.0.2"] * 5:
+                    if probe.returncode or "PASS 5/5" not in output or sources != ["10.126.0.2"] * 5:
                         raise RuntimeError("Mesh rebuild packet/source assertion failed: " + mode)
                 ping = subprocess.run(["ping", "-n", "-c", "5", "-W", "2", "10.126.0.2"], capture_output=True, text=True, timeout=20)
                 if ping.returncode or not re.search(r"5 (?:packets )?received", ping.stdout):
@@ -314,6 +325,13 @@ def main():
                     except subprocess.TimeoutExpired:
                         child.kill()
                         child.wait(timeout=5)
+            if capture is not None and capture.poll() is None:
+                subprocess.run(["sudo", "kill", "-TERM", "--", "-" + str(capture.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                try:
+                    capture.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    subprocess.run(["sudo", "kill", "-KILL", "--", "-" + str(capture.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    capture.wait(timeout=5)
             if peer is not None and peer.poll() is None:
                 subprocess.run(["sudo", "kill", "-TERM", "--", "-" + str(peer.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 try:
