@@ -24,6 +24,7 @@ import zipfile
 from fixture_file_stage import atomic_stage_script
 from fixture_transition_watch import TransitionWatch
 from fixture_android_uid_watch import AndroidUidWatch, MODES as APP_MODES
+from fixture_vpn_lockdown import EmulatorLockdown
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "com.github.metacubex.clash.meshprototype.meta"
@@ -124,15 +125,18 @@ def main():
         subprocess.run(adb + ["shell", "-T", "run-as", PACKAGE, "sh", "-c", command], input=data.encode(),
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=15)
 
-    report = ROOT / "app/build/reports/native-mesh-peer"
+    system_guard = os.environ.get('CMFA_SYSTEM_LOCKDOWN_DIAGNOSTIC') == '1'
+    report = ROOT / ("app/build/reports/native-mesh-peer-lockdown" if system_guard else "app/build/reports/native-mesh-peer")
     report.mkdir(parents=True, exist_ok=True)
     result = {"kind": "disposable-emulator-real-native-peer", "passed": False,
               "real_device_validated": False, "complete_integration": False,
-              "dns_fakeip_validated": False, "discovery_validated": False, "checks": {}}
+              "dns_fakeip_validated": False, "discovery_validated": False,
+              "system_lockdown_diagnostic":system_guard, "checks": {}}
     peer = instrument = instrumentation = capture = underlay_capture = None
     helpers = []
     transition_watches = []
     android_uid_watch = None
+    lockdown = None
     with tempfile.TemporaryDirectory(prefix="cmfa-native-peer-") as temp, ExitStack() as stack:
         temp = Path(temp)
         os.chmod(temp, 0o700)
@@ -212,6 +216,10 @@ def main():
                 time.sleep(0.3)
             else:
                 raise RuntimeError("Android peer harness startup timed out")
+            if system_guard:
+                lockdown = EmulatorLockdown(adb)
+                lockdown.enable()
+                result['system_lockdown_verified'] = True
             # Native route exchange is asynchronous. Use a bounded readiness
             # ping separately; it does not count as one of the five assertions.
             deadline = time.monotonic() + 20
@@ -440,6 +448,9 @@ def main():
             result['checks']['underlay_headers'] = observations
             if underlay_capture.returncode != 0 or not observations['available'] or observations['header_observations']:
                 raise RuntimeError('Synthetic mesh traffic observed on wrong-source underlay')
+            if lockdown is not None:
+                lockdown.restore()
+                result['system_lockdown_restored'] = True
             stage("peer-result.json", '{"passed":true}')
             instrument.wait(timeout=30)
             instrumentation.flush()
@@ -449,6 +460,13 @@ def main():
             result["passed"] = True
         finally:
             for watch in transition_watches: watch.close()
+            if lockdown is not None:
+                try:
+                    lockdown.restore()
+                    result['system_lockdown_restored'] = True
+                except (OSError,RuntimeError,subprocess.SubprocessError):
+                    result['passed'] = False
+                    result['system_lockdown_restore_failed'] = True
             try:
                 call("shell", "svc", "wifi", "enable")
             except (OSError, subprocess.SubprocessError):
