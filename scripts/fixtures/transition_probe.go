@@ -18,6 +18,8 @@ type transitionResult struct {
 	Received       int   `json:"received"`
 	Blocked        int   `json:"blocked"`
 	WrongSource    int   `json:"wrong_source"`
+	ClashSource    int   `json:"clash_gateway_source"`
+	OtherSource    int   `json:"other_source"`
 	InvalidPayload int   `json:"invalid_payload"`
 	ElapsedMillis  int64 `json:"elapsed_ms"`
 }
@@ -42,6 +44,11 @@ func watchTransition(protocol, target string, duration time.Duration, output io.
 		host, _, err := net.SplitHostPort(conn.LocalAddr().String())
 		if err != nil || host != "10.126.0.2" {
 			result.WrongSource++
+			if host == "172.19.0.1" {
+				result.ClashSource++
+			} else {
+				result.OtherSource++
+			}
 		}
 		_ = conn.SetDeadline(deadline)
 		request := []byte(fmt.Sprintf("cmfa-handover-%d\n", result.Attempts))

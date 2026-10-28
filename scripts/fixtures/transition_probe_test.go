@@ -25,7 +25,7 @@ func TestHandoverProbeRejectsSuccessfulWrongSource(t *testing.T) {
 	}()
 	var output bytes.Buffer
 	r := watchTransition("tcp", server.Addr().String(), 200*time.Millisecond, &output)
-	if r.Received == 0 || r.WrongSource != r.Attempts || r.Blocked != 0 || output.String() != "WATCH_READY\n" {
+	if r.Received == 0 || r.WrongSource != r.Attempts || r.OtherSource != r.WrongSource || r.ClashSource != 0 || r.Blocked != 0 || output.String() != "WATCH_READY\n" {
 		t.Fatalf("wrong-path evidence lost: %+v %q", r, output.String())
 	}
 }

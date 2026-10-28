@@ -156,7 +156,7 @@ def main():
             # A finite packet count bounds this diagnostic even on test failure.
             packet_log = stack.enter_context((report / "mesh-packet-headers.txt").open("w"))
             capture = subprocess.Popen(["sudo", "-n", "tcpdump", "-n", "-l", "-tt", "-i", "ci-et-peer", "-c", "2000",
-                                        "net 10.126.0.0/24 and (tcp or udp)"], stdout=packet_log, stderr=subprocess.STDOUT, start_new_session=True)
+                                        "net 10.126.0.0/24 and (tcp or udp) and not (src net 10.126.0.0/24 and dst net 10.126.0.0/24)"], stdout=packet_log, stderr=subprocess.STDOUT, start_new_session=True)
             phone = f"ipv4='10.126.0.2/24'\ndhcp=false\nlisteners=[]\nstun_servers=[]\nstun_servers_v6=[]\n[[peer]]\nuri='tcp://10.0.2.2:{port}'\n" + identity + "[flags]\nmtu=1380\nenable_ipv6=false\ndisable_p2p=true\n"
             stage("mesh.toml", phone)
             stage("ci-peer-guard", "disposable-ci-only")

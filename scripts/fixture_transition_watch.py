@@ -33,7 +33,9 @@ class TransitionWatch:
         result = values[0]
         sources = sources()
         result.update({'returncode':self.process.returncode, 'peer_observed':len(sources),
-                       'peer_wrong_source':sum(ip != '10.126.0.2' for ip in sources)})
+                       'peer_wrong_source':sum(ip != '10.126.0.2' for ip in sources),
+                       'peer_clash_gateway_source':sources.count('172.19.0.1'),
+                       'peer_other_source':sum(ip not in ('10.126.0.2', '172.19.0.1') for ip in sources)})
         result['passed'] = (self.process.returncode == 0 and result['received'] > 0
                             and result['wrong_source'] == 0 and result['invalid_payload'] == 0
                             and result['peer_wrong_source'] == 0)

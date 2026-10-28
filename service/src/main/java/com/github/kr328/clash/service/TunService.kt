@@ -19,7 +19,6 @@ import com.github.kr328.clash.service.model.AccessControlMode
 import com.github.kr328.clash.service.store.ServiceStore
 import com.github.kr328.clash.service.easytier.PacketHarness
 import com.github.kr328.clash.service.easytier.VpnLinkCommit
-import com.github.kr328.clash.service.easytier.LegacyVpnHandover
 import com.github.kr328.clash.core.easytier.NativePacketRouter
 import com.github.kr328.clash.service.util.cancelAndJoinBlocking
 import com.github.kr328.clash.service.util.parseCIDR
@@ -35,7 +34,6 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
 
     private var reason: String? = null
     private var meshHarness: PacketHarness? = null
-    private val legacyHandover = LegacyVpnHandover()
 
     private val runtime = clashRuntime {
         val store = ServiceStore(self)
@@ -197,40 +195,24 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
             }
 
             // Access Control
-            val verifiedApplications = mutableListOf<String>()
             when (store.accessControlMode) {
-                AccessControlMode.AcceptAll -> if (nativeMesh) {
-                    addDisallowedApplication(packageName)
-                    verifiedApplications.add(packageName)
-                } else Unit
+                AccessControlMode.AcceptAll -> if (nativeMesh) addDisallowedApplication(packageName) else Unit
                 AccessControlMode.AcceptSelected -> {
                     val packages = if (nativeMesh) store.accessControlPackages - packageName else store.accessControlPackages + packageName
                     var added = 0
-                    packages.forEach { application ->
-                        runCatching { addAllowedApplication(application) }.onSuccess {
-                            added++
-                            verifiedApplications.add(application)
-                        }
+                    packages.forEach {
+                        runCatching { addAllowedApplication(it) }.onSuccess { added++ }
                     }
                     if (nativeMesh) check(added > 0) { "ET_EMPTY_ALLOWED_APPLICATIONS" }
                 }
                 AccessControlMode.DenySelected -> {
                     val packages = if (nativeMesh) store.accessControlPackages + packageName else store.accessControlPackages - packageName
-                    packages.forEach { application ->
-                        if (nativeMesh && application == packageName) {
-                            addDisallowedApplication(application)
-                            verifiedApplications.add(application)
-                        } else {
-                            runCatching { addDisallowedApplication(application) }.onSuccess {
-                                verifiedApplications.add(application)
-                            }
-                        }
+                    packages.forEach {
+                        if (nativeMesh && it == packageName) addDisallowedApplication(it)
+                        else
+                        runCatching { addDisallowedApplication(it) }
                     }
                 }
-            }
-            legacyHandover.repeatEntry(Build.VERSION.SDK_INT, nativeMesh, verifiedApplications)?.let {
-                if (store.accessControlMode == AccessControlMode.AcceptSelected) addAllowedApplication(it)
-                else addDisallowedApplication(it)
             }
 
             // Blocking
@@ -314,7 +296,6 @@ class TunService : VpnService(), CoroutineScope by CoroutineScope(Dispatchers.De
                         }
                     }
                 }
-                legacyHandover.committed(Build.VERSION.SDK_INT, nativeMesh)
                 TunModule.TunDevice(
                     fd = it.detachFd(),
                     stack = store.tunStackMode,
