@@ -85,6 +85,22 @@ USB underlay success does not prove Wi-Fi/cellular recovery or physical LAN
 discovery. The result keeps DNS/Fake-IP, discovery, IPv6 and complete integration
 false until their separate cases have actually run.
 
+For a Wi-Fi TCP underlay, `physical_native_lan.py` can expose the disposable peer's
+loopback port on one private host address, accepting only the selected phone. It
+has a ten-minute deadline, four-connection bound and closes active streams on
+shutdown. `--native-lan-fixture` verifies the private profile matches that endpoint
+and does not create an adb reverse mapping. This tests TCP outer transport only.
+`physical_lan_peer.py` separately provides nonmesh echo/reject counters.
+
+`--discovery-probes-dir` accepts the synthetic arm64/amd64 `discovery_probe.go`
+binaries from a private fixture directory. The physical runner checks both
+directions of directed/limited IPv4 broadcast and two multicast destinations;
+matching payloads and the peer's virtual source are required. These are generic
+UDP packet tests, not game/mDNS/SSDP protocol tests or a standalone-app comparison.
+The runner records `generic_ipv4_discovery_validated` separately and removes its
+temporary probe executables. Test evidence must name the exact APK commit and
+local fixture revision; an unexecuted fixture is not acceptance evidence.
+
 To return this separate prototype to normal CMFA behavior, stop its VPN and
 remove only `no_backup/native-mesh-acceptance/enable` using run-as, or clear the
 prototype's app data. Neither action is needed for the user's original CMFA.

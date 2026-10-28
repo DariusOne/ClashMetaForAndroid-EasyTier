@@ -69,7 +69,26 @@ Private Go crash capture identified `panic: leaking buffer`. The pinned Mihomo
 REJECT and REJECT-DROP writers failed to release the buffer on EOF. A local debug
 regression reproduced both panics before the fix and passed after both releases
 were added; the original EOF/rejection behavior is retained. The build prepares
-this compatibility fix using a complete source hash check. The fixed APK still
-requires the extended physical rerun; isolated passing subcases do not pass Gate B.
-Physical baseline-app, discovery, DNS/Fake-IP, IPv6, network-switch and sustained
-run rows remain unpassed. Gate C is intentionally not rolled out.
+this compatibility fix using a complete source hash check.
+
+The fixed APK (`ff929e84247c74da6636769f4b5d6f5466932444`) then passed the complete
+extended physical fixture, including instrumentation cleanup, through USB and
+through actual Wi-Fi TCP underlay. The Wi-Fi fixture permits only the selected
+phone and forwards only to a local disposable native peer; no USB reverse mapping
+was present. Bidirectional TCP/UDP/ICMP and 4096-byte ICMP passed 5/5 each. Nonmesh
+LAN TCP/UDP passed 5/5; REJECT accepted zero connections. Direct/Global/Rule
+semantics and independent mesh routing all passed. Global UDP rejection also
+accepted no traffic at the test origin. These fixtures prove direct/reject parity;
+a real nonmesh proxy exit and bypass-private toggles still need their own rows.
+
+Generic IPv4 discovery probes passed 5/5 in BOTH directions for the disposable
+mesh's directed broadcast, limited broadcast, `224.0.0.251` and `239.255.255.250`.
+They verify virtual source IP and exact synthetic payload replies. They do not
+implement or claim mDNS/SSDP application protocol discovery, all games, IPv6, or
+parity against the original Android EasyTier application's discovery baseline.
+That baseline comparison remains open; the result's full `discovery_validated`
+flag deliberately remains false independently of the passing IPv4 packet probes.
+
+Physical baseline-app, DNS/Fake-IP, HTTP/SOCKS, IPv6, native UDP/STUN/QUIC outer
+transports, network-switch recovery and sustained-run rows remain unpassed.
+Gate C is intentionally not rolled out.

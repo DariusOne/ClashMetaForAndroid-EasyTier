@@ -61,16 +61,17 @@ is available in `native/easytier-upstream/easytier/LICENSE`.
 
 ## Mandatory remaining packet-path work
 
-1. Verify the opt-in VPN coordinator and native UID exclusion on Android. A Boolean
-   argument in JNI alone is **not evidence of actual protection**.
-   Audit all native TCP/UDP/STUN/QUIC/DNS sockets before enabling combined mode.
+1. Actual Wi-Fi TCP outer transport now passes the physical fixture. Audit and
+   validate native UDP/STUN/QUIC/DNS transports too; this TCP result is not blanket
+   evidence for every native transport or network-switch recovery.
 2. Validate virtual source selection and MTU on Android. Implement interface
    rebuild/network-switch recovery; the harness currently closes mesh traffic
    when those changes require a new Android interface.
 3. Route HTTP/SOCKS and post-Fake-IP/resolution flows through the same ownership
    policy. A raw destination classifier alone does not cover these flows.
-4. Confirm generic bidirectional TCP/UDP/ICMP, fragmentation and supported
-   broadcast/multicast delivery against standalone EasyTier on a real device.
+4. Physical IPv4 TCP/UDP/ICMP, 4096-byte ICMP and generic broadcast/multicast packet
+   probes pass in both directions. Compare discovery against standalone Android
+   EasyTier and complete IPv6/multi-peer tests; no all-games claim follows from echo.
 5. Validate nonmesh Rule/Global/Direct, DNS and bypass-private parity, conflict
    prompts, failures, network switches, sleep and restart cleanup.
 

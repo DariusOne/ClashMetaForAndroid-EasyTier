@@ -28,7 +28,7 @@ jobs:
           native = True
           if os.environ['EVENT_NAME'] == 'push' and re.fullmatch(r'[0-9a-f]{40}', base) and base != '0' * 40:
               paths = subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines()
-              native = any(p.startswith(('native/','core/src/main/','service/src/main/','app/src/androidTest/','scripts/fixtures/')) or p in ('.gitmodules','scripts/build-easytier-android.py','scripts/test-packet-prototype-emulator.py','scripts/test-packet-native-peer.py','build.gradle.kts','core/build.gradle.kts','app/src/main/java/com/github/kr328/clash/MainApplication.kt','.github/workflows/native-mesh-validation.yml') for p in paths)
+              native = any(p.startswith(('native/','core/src/main/','service/src/main/','app/src/androidTest/','scripts/fixtures/')) or p in ('.gitmodules','scripts/build-easytier-android.py','scripts/prepare-mihomo.py','scripts/test_prepare_mihomo.py','scripts/test-packet-prototype-emulator.py','scripts/test-packet-native-peer.py','build.gradle.kts','core/build.gradle.kts','app/src/main/java/com/github/kr328/clash/MainApplication.kt','.github/workflows/native-mesh-validation.yml') for p in paths)
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('native=' + str(native).lower() + '\n')
           PY
@@ -182,6 +182,8 @@ jobs:
         run: |
           mkdir -p app/build/physical-device-tools
           "$ANDROID_HOME/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" -Wall -Wextra -Werror -O2 scripts/fixtures/mesh_probe.c -o app/build/physical-device-tools/cmfa-mesh-probe-arm64
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o app/build/physical-device-tools/discovery-probe-arm64 scripts/fixtures/discovery_probe.go
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o app/build/physical-device-tools/discovery-probe-amd64 scripts/fixtures/discovery_probe.go
       - name: Enable KVM for disposable CI emulator
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -222,6 +224,6 @@ jobs:
           name: physical-device-test-tools-NOT-acceptance-results
           path: |
             app/build/outputs/apk/androidTest/meta/debug/*.apk
-            app/build/physical-device-tools/cmfa-mesh-probe-arm64
+            app/build/physical-device-tools/
           if-no-files-found: error
           retention-days: 14

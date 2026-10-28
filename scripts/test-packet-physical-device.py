@@ -15,6 +15,7 @@ import re
 import subprocess
 import threading
 import time
+import tomllib
 import uuid
 
 PACKAGE = 'com.github.metacubex.clash.meshprototype.meta'
@@ -32,10 +33,25 @@ def main():
     parser.add_argument('--reverse-port', type=int, default=43179)
     parser.add_argument('--host-port', type=int)
     parser.add_argument('--lan-fixture', type=Path)
+    parser.add_argument('--native-lan-fixture', type=Path)
+    parser.add_argument('--discovery-probes-dir', type=Path)
     args = parser.parse_args()
     base = [args.adb, '-s', args.serial]
     root = args.test_root.resolve(strict=True)
     lan = None
+    native_lan = None
+    if args.native_lan_fixture:
+        if args.phase != 'peer':
+            parser.error('Native LAN transport requires the peer phase')
+        args.native_lan_fixture = args.native_lan_fixture.resolve(strict=True)
+        native_lan = json.loads((args.native_lan_fixture/'native-lan-ready.json').read_text(encoding='utf-8'))
+        address = ipaddress.IPv4Address(native_lan['host'])
+        if not address.is_private or address.is_loopback or not 1024 <= native_lan['port'] <= 65535:
+            parser.error('Invalid native LAN transport')
+        # Read only the disposable profile; never expose its random identity.
+        profile = tomllib.loads((root/'phone.toml').read_text(encoding='utf-8'))
+        if profile.get('peer') != [{'uri':f"tcp://{native_lan['host']}:{native_lan['port']}"}]:
+            parser.error('Disposable profile does not match selected LAN fixture')
     if args.lan_fixture:
         if args.phase != 'peer':
             parser.error('LAN fixture requires the peer phase')
@@ -72,11 +88,13 @@ def main():
     stage('physical-consent', token.encode())
     result = {'kind':'physical-android-native-packet-fixture', 'phase':args.phase, 'passed':False,
               'complete_integration':False, 'dns_fakeip_validated':False, 'discovery_validated':False,
+              'generic_ipv4_discovery_validated':False,
               'ipv6_validated':False, 'ipv4_large_packet_validated':False,
-              'physical_transport':'USB reverse to isolated Linux native peer', 'checks':{}}
+              'physical_transport':('none (local lifecycle)' if args.phase=='lifecycle' else ('Wi-Fi TCP through private LAN fixture to isolated Linux native peer' if native_lan else 'USB reverse to isolated Linux native peer')), 'checks':{}}
     instrumentation = None
     helpers = []
     reverse_created = False
+    discovery_staged = False
     log = (root / (args.phase + '-instrumentation.txt')).open('w', encoding='utf-8')
     try:
         if args.phase == 'peer':
@@ -84,13 +102,21 @@ def main():
                 raise RuntimeError('Explicit disposable peer and probe required')
             if not all(1024 <= p <= 65535 for p in (args.reverse_port, args.host_port)):
                 raise RuntimeError('Invalid test port')
-            previous = adb('reverse', '--list').stdout
-            if f'tcp:{args.reverse_port} ' in previous:
-                raise RuntimeError('Test reverse port already exists')
-            adb('reverse', f'tcp:{args.reverse_port}', f'tcp:{args.host_port}')
-            reverse_created = True
+            if not native_lan:
+                previous = adb('reverse', '--list').stdout
+                if f'tcp:{args.reverse_port} ' in previous:
+                    raise RuntimeError('Test reverse port already exists')
+                adb('reverse', f'tcp:{args.reverse_port}', f'tcp:{args.host_port}')
+                reverse_created = True
             adb('push', str(args.probe.resolve(strict=True)), '/data/local/tmp/cmfa-physical-probe')
             adb('shell', 'chmod', '700', '/data/local/tmp/cmfa-physical-probe')
+            if args.discovery_probes_dir:
+                probes=args.discovery_probes_dir.resolve(strict=True)
+                discovery_staged=True
+                adb('push',str((probes/'discovery-probe-arm64').resolve(strict=True)),'/data/local/tmp/cmfa-discovery-probe')
+                adb('shell','chmod','700','/data/local/tmp/cmfa-discovery-probe')
+                call('docker','cp',str((probes/'discovery-probe-amd64').resolve(strict=True)),args.container+':/tmp/cmfa-discovery-probe')
+                call('docker','exec',args.container,'chmod','700','/tmp/cmfa-discovery-probe')
             stage('mesh.toml', (root/'phone.toml').read_bytes())
             stage('ci-peer-guard', b'disposable-physical-only')
             stage('ci-reject-port', str(lan['ports']['reject'] if lan else 30103).encode())
@@ -217,6 +243,38 @@ def main():
                     if mode=='global': lan_probe('udp',False)
                     result['checks']['mode_'+mode]={'mesh_tcp':'5/5','nonmesh_expected':'direct' if mode=='direct' else 'reject','passed':True}
                     print('Nonmesh '+mode+' semantics and independent mesh path: passed',flush=True)
+            if native_lan:
+                transport_counts=json.loads((args.native_lan_fixture/'native-lan-counts.json').read_text(encoding='utf-8'))
+                if not all(transport_counts.get(k,0)>0 for k in ('accepted','phone_to_peer','peer_to_phone')):
+                    raise RuntimeError('Native LAN transport did not carry bidirectional traffic')
+                result['checks']['native_lan_tcp']=transport_counts
+            if discovery_staged:
+                discovery={}
+                for destination in ('10.126.0.255','255.255.255.255','224.0.0.251','239.255.255.250'):
+                    for direction in ('outbound','inbound'):
+                        phone=base+['shell','/data/local/tmp/cmfa-discovery-probe']
+                        peer=['docker','exec',args.container,'/tmp/cmfa-discovery-probe']
+                        server=(peer+['server','10.126.0.1',destination,'27443'] if direction=='outbound' else phone+['server','10.126.0.2',destination,'27443'])
+                        client=(phone+['client','10.126.0.2',destination,'27443'] if direction=='outbound' else peer+['client','10.126.0.1',destination,'27443'])
+                        helper=subprocess.Popen(server,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,encoding='utf-8',errors='replace')
+                        helpers.append(helper)
+                        events=queue.Queue()
+                        def consume_discovery(stream,events=events):
+                            for line in stream: events.put(line.strip())
+                        thread=threading.Thread(target=consume_discovery,args=(helper.stdout,),daemon=True);thread.start()
+                        if events.get(timeout=10)!='READY':
+                            raise RuntimeError('Discovery listener failed')
+                        probe=call(*client,timeout=50,check=False)
+                        helper.wait(timeout=12);thread.join(timeout=2)
+                        lines=[]
+                        while not events.empty(): lines.append(events.get_nowait())
+                        passed=probe.returncode==0 and 'PASS 5/5' in probe.stdout and helper.returncode==0 and 'PASS 5/5' in lines
+                        discovery[destination+'/'+direction]={'passed':passed,'expected':5}
+                        result['checks']['discovery_ipv4']=discovery
+                        if not passed:
+                            raise RuntimeError('IPv4 generic discovery failed: '+destination+'/'+direction)
+                        print('IPv4 discovery '+destination+' '+direction+': 5/5',flush=True)
+                result['generic_ipv4_discovery_validated']=True
             stage('peer-result.json', b'{"passed":true}')
             instrumentation.wait(timeout=45)
         log.flush()
@@ -266,6 +324,11 @@ def main():
         if args.phase=='peer':
             try: adb('shell','rm','-f','/data/local/tmp/cmfa-physical-probe',timeout=15)
             except Exception: cleanup_errors.append('test_probe_removal_unconfirmed')
+        if discovery_staged:
+            try:
+                adb('shell','rm','-f','/data/local/tmp/cmfa-discovery-probe',timeout=15)
+                call('docker','exec',args.container,'rm','-f','/tmp/cmfa-discovery-probe',timeout=15)
+            except Exception: cleanup_errors.append('discovery_probe_removal_unconfirmed')
         log.close()
         result['cleanup_errors']=cleanup_errors
         (root/(args.phase+'-result.json')).write_text(json.dumps(result,indent=2)+'\n',encoding='utf-8')
