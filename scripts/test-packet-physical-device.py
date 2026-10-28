@@ -37,11 +37,24 @@ def main():
     parser.add_argument('--discovery-probes-dir', type=Path)
     parser.add_argument('--rebuild-cycles', type=int, choices=range(0,4), default=0)
     parser.add_argument('--wifi-return-cycles', type=int, choices=range(0,4), default=0)
+    parser.add_argument('--proxy-fixture', type=Path)
     args = parser.parse_args()
     base = [args.adb, '-s', args.serial]
     root = args.test_root.resolve(strict=True)
     lan = None
     native_lan = None
+    proxy = None
+    if args.proxy_fixture:
+        if args.phase != 'peer': parser.error('Proxy fixture requires peer phase')
+        args.proxy_fixture=args.proxy_fixture.resolve(strict=True)
+        proxy=json.loads((args.proxy_fixture/'proxy-ready.json').read_text(encoding='utf-8'))
+        address=ipaddress.IPv4Address(proxy['host'])
+        if not address.is_private or address.is_loopback or proxy['destination']!=proxy['host']:
+            parser.error('Invalid controlled proxy destination')
+        if not all(type(proxy[k]) is int and 1024<=proxy[k]<=65535 for k in ('port','destination_port')):
+            parser.error('Invalid proxy fixture ports')
+        if not re.fullmatch('[0-9a-f]{16}',proxy['username']) or not re.fullmatch('[0-9a-f]{32}',proxy['password']):
+            parser.error('Invalid one-use proxy identity')
     if args.native_lan_fixture:
         if args.phase != 'peer':
             parser.error('Native LAN transport requires the peer phase')
@@ -74,11 +87,11 @@ def main():
     def adb(*command, **kwargs):
         return call(*base, *command, **kwargs)
     def stage(name, data):
-        assert name in {'physical-consent', 'mesh.toml', 'ci-peer-guard', 'ci-reject-port', 'peer-result.json', 'mode-request.json', 'rebuild-request'}
+        assert name in {'physical-consent', 'mesh.toml', 'ci-peer-guard', 'ci-reject-port', 'peer-result.json', 'mode-request.json', 'rebuild-request','ci-proxy.json','network-options-request.json'}
         command = "'umask 077; mkdir -p " + FOLDER + '; cat > ' + FOLDER + name + "'"
         subprocess.run(base + ['shell', '-T', 'run-as', PACKAGE, 'sh', '-c', command], input=data, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=20)
     def read(name):
-        assert name in {'peer-ready', 'status.json', 'mode-ready.json'}
+        assert name in {'peer-ready', 'status.json', 'mode-ready.json','network-options-ready.json'}
         return adb('shell', 'run-as', PACKAGE, 'cat', FOLDER + name, check=False).stdout.strip()
     if adb('shell', 'getprop', 'ro.kernel.qemu').stdout.strip() == '1':
         raise RuntimeError('Physical device required')
@@ -125,6 +138,7 @@ def main():
             stage('mesh.toml', (root/'phone.toml').read_bytes())
             stage('ci-peer-guard', b'disposable-physical-only')
             stage('ci-reject-port', str(lan['ports']['reject'] if lan else 30103).encode())
+            if proxy: stage('ci-proxy.json',json.dumps(proxy).encode())
         test = 'NativeMeshSmokeTest' if args.phase == 'lifecycle' else 'NativeMeshPeerTest'
         instrumentation = subprocess.Popen(base + ['shell','am','instrument','-w','-r','-e','physicalDeviceConsent',token,'-e','class','com.github.kr328.clash.'+test,PACKAGE+'.test/androidx.test.runner.AndroidJUnitRunner'], stdout=log, stderr=subprocess.STDOUT)
         # Instrumentation restarts its target. Opening the Activity before that
@@ -343,6 +357,35 @@ def main():
                     cycles.append({'cycle':cycle,'observed_disconnect_stage':disconnected,'outbound_tcp':'5/5','outbound_udp':'5/5','inbound_icmp':'5/5','session_preserved':True,'cellular_mesh_transport_validated':False})
                     result['checks']['wifi_return_cycles']=cycles
                     print('Wi-Fi interruption/return '+str(cycle)+': TCP/UDP/ICMP 5/5; same mesh session',flush=True)
+            if proxy:
+                def proxy_counts():return json.loads((args.proxy_fixture/'proxy-counts.json').read_text(encoding='utf-8'))
+                def proxy_probe(direct):
+                    for protocol in ('tcp','udp'):
+                        before=proxy_counts()
+                        out=adb('shell','/data/local/tmp/cmfa-physical-probe',protocol+'-client',proxy['destination'],str(proxy['destination_port']),timeout=60)
+                        after=proxy_counts()
+                        selected=('direct_'+protocol) if direct else protocol
+                        other=protocol if direct else ('direct_'+protocol)
+                        if 'PASS 5/5' not in out.stdout or after[selected]-before[selected]!=5 or after[other]!=before[other]:
+                            raise RuntimeError('Nonmesh proxy/direct path mismatch: '+protocol)
+                proxy_probe(False)
+                result['checks']['nonmesh_socks_proxy']={'tcp':'5/5','udp':'5/5','direct_origin_connections':0,'authentication_required':True}
+                for sequence,bypass in ((10,True),(11,False)):
+                    stage('network-options-request.json',json.dumps({'sequence':sequence,'bypass_private':bypass}).encode())
+                    deadline=time.monotonic()+20
+                    while time.monotonic()<deadline:
+                        try: ready=json.loads(read('network-options-ready.json')).get('sequence')
+                        except (ValueError,AttributeError): ready=None
+                        if ready==sequence:break
+                        time.sleep(.2)
+                    else:raise RuntimeError('Private-network bypass setting did not apply')
+                    proxy_probe(bypass)
+                    before=len(counters()['tcp'])
+                    mesh=adb('shell','/data/local/tmp/cmfa-physical-probe','tcp-client','10.126.0.1','30101',timeout=60)
+                    if 'PASS 5/5' not in mesh.stdout or counters()['tcp'][before:]!=['10.126.0.2']*5:
+                        raise RuntimeError('Private-network bypass lost mesh ownership')
+                    result['checks']['bypass_private_'+str(bypass).lower()]={'nonmesh_expected':'direct' if bypass else 'authenticated-proxy','tcp':'5/5','udp':'5/5','mesh_tcp':'5/5'}
+                    print('bypass-private '+str(bypass)+': original nonmesh path and mesh capture passed',flush=True)
             stage('peer-result.json', b'{"passed":true}')
             instrumentation.wait(timeout=45)
         log.flush()
