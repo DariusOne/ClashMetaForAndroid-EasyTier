@@ -458,27 +458,57 @@ def main():
                     raise RuntimeError("Inbound packets did not recover after rebuild")
                 cycle.update({"passed": True, "outbound_tcp": "5/5", "outbound_udp": "5/5", "inbound_icmp": "5/5"})
                 original = state
+            result['handover_passed'] = True
+            if system_guard:
+                # A lockdown-only handover pass is insufficient if CMFA's
+                # existing bypass-private option loses normal LAN access.
+                policy = {'expected_nonmesh':'direct', 'states':[]}
+                result['checks']['system_guard_bypass_private'] = policy
+                for sequence, bypass in ((20,True),(21,False)):
+                    stage('network-options-request.json',json.dumps({'sequence':sequence,'bypass_private':bypass}))
+                    deadline=time.monotonic()+20
+                    while time.monotonic()<deadline:
+                        output=subprocess.run(adb+['shell','run-as',PACKAGE,'cat',FOLDER+'network-options-ready.json'],capture_output=True,text=True,timeout=3)
+                        try: ready=json.loads(output.stdout).get('sequence')==sequence
+                        except (ValueError,AttributeError): ready=False
+                        if ready: break
+                        time.sleep(.1)
+                    else: raise RuntimeError('Disposable bypass-private change did not become ready')
+                    row={'bypass_private':bypass,'protocols':{}}
+                    policy['states'].append(row)
+                    for mode in ('tcp','udp'):
+                        echo=Echo(mode=='udp')
+                        stack.callback(echo.close)
+                        probe=subprocess.run(adb+['shell','/data/local/tmp/cmfa-mesh-probe',mode+'-client','10.0.2.2',str(echo.port)],capture_output=True,text=True,timeout=20)
+                        row['protocols'][mode]={'replied_5_of_5':probe.returncode==0 and 'PASS 5/5' in probe.stdout,
+                            'origin_connections':len(echo.sources)}
+                    mesh=Echo(False)
+                    stack.callback(mesh.close)
+                    output=call('shell','/data/local/tmp/cmfa-mesh-probe','tcp-client','10.126.0.1',str(mesh.port),timeout=30)
+                    row['mesh_5_of_5']='PASS 5/5' in output and mesh.sources==['10.126.0.2']*5
+                    if not row['mesh_5_of_5']: raise RuntimeError('Managed mesh failed during bypass-private comparison')
+                policy['preserved']=all(v['replied_5_of_5'] and v['origin_connections']==5 for row in policy['states'] for v in row['protocols'].values())
+                if not all(v['replied_5_of_5'] and v['origin_connections']==5 for v in policy['states'][-1]['protocols'].values()):
+                    raise RuntimeError('Nonmesh CMFA path did not recover after bypass-private comparison')
             stop_capture(underlay_capture)
             observations = underlay_observations(report, rebuilds)
             result['checks']['underlay_headers'] = observations
             if underlay_capture.returncode != 0 or not observations['available'] or observations['header_observations']:
                 raise RuntimeError('Synthetic mesh traffic observed on wrong-source underlay')
             if lockdown is not None:
-                lockdown.restore()
-                result['system_lockdown_restored'] = True
+                lockdown.release_blocking()
             stage("peer-result.json", '{"passed":true}')
             instrument.wait(timeout=30)
             instrumentation.flush()
             text = (report / "instrumentation.txt").read_text()
             if instrument.returncode or "OK (1 test)" not in text or "FAILURES!!!" in text:
                 raise RuntimeError("Android peer lifecycle assertion failed")
-            result["passed"] = True
+            result["passed"] = result['checks'].get('system_guard_bypass_private',{}).get('preserved',True)
         finally:
             for watch in transition_watches: watch.close()
             if lockdown is not None:
                 try:
-                    lockdown.restore()
-                    result['system_lockdown_restored'] = True
+                    lockdown.release_blocking()
                 except (OSError,RuntimeError,subprocess.SubprocessError):
                     result['passed'] = False
                     result['system_lockdown_restore_failed'] = True
@@ -487,7 +517,7 @@ def main():
             except (OSError, subprocess.SubprocessError):
                 result["passed"] = False
                 result["wifi_restore_failed"] = True
-            if not result["passed"]:
+            if not result["passed"] and instrument is not None and instrument.poll() is None:
                 try:
                     stage("peer-result.json", '{"passed":false}')
                 except Exception:
@@ -515,6 +545,13 @@ def main():
             if not result['fixture_cleanup_verified']:
                 result['passed'] = False
                 result['fixture_cleanup_failed'] = True
+            if lockdown is not None:
+                try:
+                    lockdown.restore()
+                    result['system_lockdown_restored'] = True
+                except (OSError, RuntimeError, subprocess.SubprocessError):
+                    result['passed'] = False
+                    result['system_lockdown_restore_failed'] = True
             if android_uid_watch is not None:
                 try: android_uid_watch.close()
                 except (OSError, subprocess.SubprocessError):
@@ -546,6 +583,9 @@ def main():
             call("shell", "rm", "-f", "/data/local/tmp/cmfa-transition-probe")
             call("shell", "rm", "-f", "/data/local/tmp/cmfa-bionic-transition-probe")
             print(json.dumps(result), flush=True)
+
+    if not result['passed']:
+        raise RuntimeError('Handover or CMFA policy preservation gate failed')
 
 
 if __name__ == "__main__":

@@ -120,7 +120,8 @@ class NativeMeshPeerTest {
                     }
                     val options = runCatching { JSONObject(File(folder, "network-options-request.json").readText()) }.getOrNull()
                     if (options != null && options.optInt("sequence") > optionsSequence) {
-                        check(physicalDevice && proxy != null && options.getInt("sequence") in 10..100)
+                        check(options.getInt("sequence") in 10..100)
+                        check(!physicalDevice || proxy != null)
                         ServiceStore(context).bypassPrivateNetwork = options.getBoolean("bypass_private")
                         optionsSequence = options.getInt("sequence")
                         File(folder, "rebuild-request").writeText(optionsSequence.toString())

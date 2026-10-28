@@ -94,6 +94,33 @@ the user. A separate test-APK activity compares ordinary Android app-UID Java
 socket behavior against the existing shell-UID Go probe in the same replacement
 window. Both gates remain strict; this comparison is diagnostic, not a waiver.
 
+The comparison has now reproduced this in several implementations. Run
+`40663378467` recorded one wrong-source TCP connection from Android NDK/Bionic,
+also observed by the peer. Run `40666685143` then recorded one wrong-source TCP
+connection at the peer from the ordinary application UID's Java socket. Explicit
+AF_INET application probes run alongside Java NIO and shell Go/Bionic probes;
+zeros in one finite window do not establish immunity. The Linux header filter
+did not observe the application's wrong-source connection, so that capture is
+not a complete underlay monitor and cannot prove absence of escaped SYNs.
+
+A separate system always-on/lockdown comparison uses visible Settings controls
+on the disposable API 30 emulator only. The initial guarded run was invalid:
+prematurely terminated instrumentation left a stale profile and ready marker.
+The fixture now waits for Android cleanup and requires an empty profile store
+and absent run markers before another mode. Both ordinary and guarded verdicts
+remain required; no real-phone setting is enabled. Lockdown can change excluded
+application and bypass-private behavior, which must not silently replace CMFA's
+policy contract even if the handover comparison passes.
+
+Run `40668680639` reproduced two peer-observed wrong-source application TCP
+connections in ordinary mode (one Java NIO, one explicit AF_INET); that fixture
+cleaned up correctly. The guarded comparison reached all three replacements:
+15,164 attempts, 15,104 replies, 60 incomplete requests and no wrong sources
+across the eight socket probes. Its Settings teardown failed, so the whole run
+remains failed and no APK was released. The next fixture separates release of
+blocking from disabling always-on, which itself can stop the VPN, and checks
+whether bypass-private on/off preserves ordinary nonmesh LAN connectivity.
+
 The first physical arm64 Android 17 fixture was executed on 2026-10-28 using
 prototype commit `46f358e0dd3ed3288e31186567fba2224db5ff13` and a private,
 disposable Linux peer. Ten start/stop cycles and native-child crash isolation
