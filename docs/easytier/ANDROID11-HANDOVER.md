@@ -3,7 +3,8 @@
 Historical record: on 2026-10-28 the user changed the integration's minimum
 supported version to Android 12. Android 11 is therefore outside that range;
 the failure evidence is preserved. Android 12+ still requires its own strict
-handover verification, without changing existing user settings.
+handover verification, without changing existing user settings. The fresh
+[Android 12/15 controls](ANDROID12-SUPPORT.md) also reproduced transition escapes.
 
 The required behavior remains unchanged: only active EasyTier destinations use
 the mesh; unrelated traffic keeps CMFA policy, including private-network bypass

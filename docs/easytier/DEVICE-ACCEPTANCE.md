@@ -8,6 +8,10 @@ handover and API 31/35 public-API controls are required before proceeding;
 raising the minimum alone is not acceptance. Existing routing, bypass-private,
 per-app selection and no-extra-system-setting requirements remain unchanged.
 
+The fresh API 31/35 public-API controls both reproduced transition escapes;
+see [Android 12+ support and evidence](ANDROID12-SUPPORT.md). Higher minimum
+version does not waive the strict continuous-handover gate.
+
 Use a separate test APK/application ID and a disposable mesh profile. Never copy
 real subscriptions, mesh secrets, endpoint lists, TOTP or VPS keys into this repo,
 CI, command-line arguments or logs. Do not install over the user's working CMFA.
@@ -90,7 +94,8 @@ Android descriptor. Network scope, overlap decisions and native readiness are
 updated in one policy commit. The emulator fixture separately tests actual
 Wi-Fi/cellular changes and forced interface replacements with the same strict
 continuous-source assertions. Address/route changes still require replacement;
-that Android 11 acceptance gate remains unresolved and is not skipped.
+those Android 11 results are historical. The same strict gate applies to the
+new Android 12+ support range.
 
 Commit `5dcea88` / run `40655939624` passed six actual emulator Wi-Fi/cellular
 transitions with the same interface and mesh generation: 7,416 attempts,
@@ -214,4 +219,5 @@ validity, before/after reachability and cleanup, but failed containment. Its
 discard-only VPN allowed 23 peer connections/datagrams and 13 replies during
 12 interface replacements; the no-replacement baseline allowed zero. See
 [the full evidence and limits](ANDROID11-HANDOVER.md). No setting-dependent
-workaround was adopted; Android 11 dynamic interface compatibility remains open.
+workaround was adopted. Android 11 remains a historical failure outside the
+new support range; fresh Android 12+ results are tracked separately above.

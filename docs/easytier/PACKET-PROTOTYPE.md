@@ -73,7 +73,8 @@ Android 11 evidence below is historical and remains available for diagnosis;
 it is outside the newly requested native integration support range. Raising
 the minimum does not prove that Android 12+ handover is safe. The ordinary
 settings test remains strict, with no always-on/lockdown prerequisite. The
-small independent control additionally runs on API 31 and API 35.
+small independent control additionally runs on API 31 and API 35. Both fresh
+controls reproduced a transition escape; see [support-range evidence](ANDROID12-SUPPORT.md).
 
 ## Explicit physical-device fixture
 
