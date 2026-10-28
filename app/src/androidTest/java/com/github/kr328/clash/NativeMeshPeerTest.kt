@@ -142,14 +142,31 @@ class NativeMeshPeerTest {
             assertTrue("External packet probes failed", result.getBoolean("passed"))
             assertEquals("active", stage())
         } finally {
-            context.stopClashService()
-            withTimeoutOrNull(15_000) { while (stage() != "stopped") delay(100) }
-            withClash { clearOverride(Clash.OverrideSlot.Session) }
-            id?.let { withProfile { delete(it) } }
-            ServiceStore(context).bypassPrivateNetwork = false
-            for (name in listOf("enable", "mesh.toml", "ci-peer-guard", "ci-reject-port", "peer-ready", "peer-result.json", "mode-request.json", "mode-ready.json", "rebuild-request", "ci-proxy.json", "network-options-request.json", "network-options-ready.json")) File(folder, name).delete()
-            Remote.service.unbind()
-            NativeMeshAcceptanceGuard.closeForeground()
+            // Opening system Settings makes the app invisible and Remote's
+            // activity observer unbinds the UI service. Rebind explicitly for
+            // fixture cleanup rather than waiting forever for a foreground UI.
+            // Each cleanup stage is bounded and still runs if another fails.
+            var cleanupFailure: Throwable? = null
+            withContext(NonCancellable) {
+                Remote.service.bind()
+                try {
+                    withTimeout(10_000) { withClash { clearOverride(Clash.OverrideSlot.Session) } }
+                } catch (e: Throwable) { cleanupFailure = e }
+                try {
+                    context.stopClashService()
+                    withTimeout(15_000) { while (stage() != "stopped") delay(100) }
+                } catch (e: Throwable) { if (cleanupFailure == null) cleanupFailure = e }
+                try {
+                    id?.let { withTimeout(10_000) { withProfile { delete(it) } } }
+                } catch (e: Throwable) { if (cleanupFailure == null) cleanupFailure = e }
+                finally {
+                    ServiceStore(context).bypassPrivateNetwork = false
+                    for (name in listOf("enable", "mesh.toml", "ci-peer-guard", "ci-reject-port", "peer-ready", "peer-result.json", "mode-request.json", "mode-ready.json", "rebuild-request", "ci-proxy.json", "network-options-request.json", "network-options-ready.json")) File(folder, name).delete()
+                    Remote.service.unbind()
+                    NativeMeshAcceptanceGuard.closeForeground()
+                }
+            }
+            cleanupFailure?.let { throw IllegalStateException("ET_TEST_CLEANUP_FAILED", it) }
         }
     }
 }
