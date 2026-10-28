@@ -42,6 +42,10 @@ class PacketHarness private constructor(private val vpn: VpnService, private val
     private var installed = emptyList<Address>()
     private var networkKey = ""
     private var initialRoutes = emptySet<String>()
+    private var knownRoutes = emptySet<String>()
+    private var localNetworks = emptyList<String>()
+    @Volatile private var interfaceRevision = 0
+    private var rebuildRequest = 0
     private val directory get() = File(vpn.noBackupFilesDir, "native-mesh-acceptance")
 
     // Private, fixed-code diagnostics for the opt-in harness. No config,
@@ -50,7 +54,8 @@ class PacketHarness private constructor(private val vpn: VpnService, private val
         if (stage == "active" && failed) return
         runCatching {
             val temp = File(directory, "status.tmp")
-            temp.writeText(JSONObject().put("schema", 1).put("generation", generation).put("stage", stage).toString())
+            temp.writeText(JSONObject().put("schema", 1).put("generation", generation).put("stage", stage)
+                .put("interface_revision", interfaceRevision).put("rebuild_request", rebuildRequest).toString())
             Os.chmod(temp.path, 384)
             check(temp.renameTo(File(directory, "status.json")))
         }
@@ -91,8 +96,10 @@ class PacketHarness private constructor(private val vpn: VpnService, private val
             }
             installed = readAddresses(first)
             initialRoutes = readRoutes(first) + installed.map { it.network() }
-            val physical = physicalNetwork()
+            knownRoutes = initialRoutes
+            val physical = physicalNetwork() ?: error("ET_NO_PHYSICAL_NETWORK")
             networkKey = physical.first
+            localNetworks = physical.second
             val device = createVpn(installed, initialRoutes)
             val deviceFd = ParcelFileDescriptor.adoptFd(device.fd)
             val pair = packetPair()
@@ -119,9 +126,11 @@ class PacketHarness private constructor(private val vpn: VpnService, private val
                 val attached = native!!.snapshot()
                 check(JSONObject(attached).let { it.getBoolean("running") && it.getBoolean("attached") }) { "ET_ENGINE_NOT_READY" }
                 check(NativePacketRouter.update(attached, installed.joinToString(",") { it.cidr }))
+                interfaceRevision = 1
                 status("active")
             } finally { deviceFd.close(); pair.first.close(); pair.second.close() }
             monitor = scope.launch(Dispatchers.IO) {
+                var waitingForNetwork = false
                 while (isActive && !failed) {
                     try {
                         val raw = native!!.snapshot()
@@ -130,13 +139,48 @@ class PacketHarness private constructor(private val vpn: VpnService, private val
                             failClosed("ET_ENGINE_NOT_READY")
                             break
                         }
-                        // The harness closes on changes needing a new Android
-                        // interface. Production transactional rebuild is gated.
-                        if (readAddresses(next) != installed || (!allowRouteGrowth && readRoutes(next).any { !covered(it) }) || physicalNetwork().first != networkKey) {
-                            failClosed("ET_INTERFACE_REBUILD_REQUIRED")
-                            break
+                        val addresses = readAddresses(next)
+                        val routes = readRoutes(next) + addresses.map { it.network() }
+                        val physicalNext = physicalNetwork()
+                        knownRoutes = knownRoutes + routes
+                        if (physicalNext == null || addresses.isEmpty()) {
+                            // Keep the current Android VPN and its route ownership.
+                            // Ordinary Clash traffic is not changed to DIRECT.
+                            NativePacketRouter.failClosed(generation)
+                            waitingForNetwork = true
+                            status("waiting-network")
+                        } else {
+                            val requested = requestedRebuild()
+                            if (waitingForNetwork || requested > rebuildRequest || addresses != installed ||
+                                (!allowRouteGrowth && routes.any { !covered(it) }) ||
+                                physicalNext.first != networkKey || physicalNext.second != localNetworks) {
+                                status("rebuilding-interface")
+                                check(NativePacketRouter.suspendInterface(generation)) { "ET_INTERFACE_PAUSE_FAILED" }
+                                // Pause first: establish invalidates the old descriptor
+                                // before it hands us the replacement. Preserve all known
+                                // routes so withdrawal cannot become an OS bypass.
+                                val replacement = createVpn(addresses, knownRoutes)
+                                ParcelFileDescriptor.adoptFd(replacement.fd).use { descriptor ->
+                                    val request = JSONObject().apply {
+                                        put("snapshot", next)
+                                        put("installed", JSONArray(addresses.map { it.cidr }))
+                                        put("network", physicalNext.first)
+                                        put("localNetworks", JSONArray(physicalNext.second))
+                                    }
+                                    check(NativePacketRouter.replaceInterface(descriptor.detachFd(), request.toString())) { "ET_INTERFACE_REPLACE_FAILED" }
+                                }
+                                installed = addresses
+                                initialRoutes = knownRoutes
+                                networkKey = physicalNext.first
+                                localNetworks = physicalNext.second
+                                interfaceRevision++
+                                rebuildRequest = requested
+                                waitingForNetwork = false
+                                status("active")
+                            } else {
+                                check(NativePacketRouter.update(raw, installed.joinToString(",") { it.cidr }))
+                            }
                         }
-                        check(NativePacketRouter.update(raw, installed.joinToString(",") { it.cidr }))
                     } catch (e: CancellationException) { throw e }
                     catch (_: Exception) { failClosed("ET_STATUS_FAILED"); break }
                     delay(1_000)
@@ -166,11 +210,21 @@ class PacketHarness private constructor(private val vpn: VpnService, private val
         status("stopped")
     }
 
-    private fun physicalNetwork(): Pair<String, List<String>> {
+    // Explicit private fixture control, never an exported broadcast or Intent.
+    private fun requestedRebuild(): Int {
+        val guard = File(directory, "ci-peer-guard")
+        if (!guard.isFile || guard.length() > 64 || guard.readText() !in listOf("disposable-physical-only", "disposable-ci-only")) return rebuildRequest
+        val request = File(directory, "rebuild-request")
+        if (!request.isFile || request.length() !in 1..16) return rebuildRequest
+        return request.readText().trim().toIntOrNull()?.takeIf { it in rebuildRequest..100 } ?: rebuildRequest
+    }
+
+    private fun physicalNetwork(): Pair<String, List<String>>? {
         val cm = vpn.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val networks = cm.allNetworks.filter { n -> cm.getNetworkCapabilities(n)?.let { it.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN) && it.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) } == true }
-        val n = networks.minByOrNull { n -> if (cm.getNetworkCapabilities(n)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true) 0 else 1 } ?: error("ET_NO_PHYSICAL_NETWORK")
-        val local = cm.getLinkProperties(n)?.linkAddresses.orEmpty().filter { !it.address.isLinkLocalAddress && !it.address.isLoopbackAddress }.map { Address(it.address.hostAddress!!, it.prefixLength).network() }
+        val n = cm.activeNetwork?.takeIf { it in networks } ?: networks.minByOrNull { n -> if (cm.getNetworkCapabilities(n)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true) 0 else 1 } ?: return null
+        val properties = cm.getLinkProperties(n) ?: return null
+        val local = properties.linkAddresses.filter { !it.address.isLinkLocalAddress && !it.address.isLoopbackAddress }.map { Address(it.address.hostAddress!!, it.prefixLength).network() }.distinct().sorted()
         return n.toString() to local
     }
 

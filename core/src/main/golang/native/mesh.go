@@ -4,6 +4,9 @@ package main
 import "C"
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -101,4 +104,48 @@ func closePacketMesh(generation C.longlong) {
 			_ = h.SetReady(uint64(generation), false)
 		}
 	}
+}
+
+//export suspendPacketInterface
+func suspendPacketInterface(generation C.longlong) C.int {
+	rTunLock.Lock()
+	defer rTunLock.Unlock()
+	if rTun != nil {
+		if h, ok := rTun.closer.(*tun.Hybrid); ok && h.SuspendInterface(uint64(generation)) == nil {
+			return 0
+		}
+	}
+	return 1
+}
+
+//export replacePacketInterface
+func replacePacketInterface(fd C.int, requestJSON C.c_string) C.int {
+	rTunLock.Lock()
+	defer rTunLock.Unlock()
+	var request struct {
+		Snapshot      router.NativeSnapshot `json:"snapshot"`
+		Installed     []netip.Prefix        `json:"installed"`
+		Network       string                `json:"network"`
+		LocalNetworks []netip.Prefix        `json:"localNetworks"`
+	}
+	data := []byte(C.GoString(requestJSON))
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if len(data) > 512*1024 || decoder.Decode(&request) != nil || decoder.Decode(new(any)) != io.EOF || len(request.Installed) > 2 || len(request.LocalNetworks) > 64 || len(request.Network) > 256 || rTun == nil {
+		if fd >= 0 {
+			syscall.Close(int(fd))
+		}
+		return 1
+	}
+	h, ok := rTun.closer.(*tun.Hybrid)
+	if !ok {
+		if fd >= 0 {
+			syscall.Close(int(fd))
+		}
+		return 1
+	}
+	if h.ReplaceInterface(int(fd), request.Snapshot, request.Installed, request.Network, request.LocalNetworks) != nil {
+		return 1
+	}
+	return 0
 }

@@ -53,6 +53,12 @@ is available in `native/easytier-upstream/easytier/LICENSE`.
   unusable until the owner acknowledges it is installed on the Android interface.
 - Shared post-resolution ownership classification with mixed-answer rejection;
   this is an API/tested decision, **not yet a wired Mihomo DNS/HTTP/SOCKS hook**.
+- Experimental Android-interface replacement retains both engines and the same
+  route policy. Pause precedes `Builder.establish`; old descriptor errors and
+  stale packets cannot tear down the dispatcher during replacement. Address,
+  route-capture and physical-network changes trigger a rebuild; offline periods
+  retain the VPN and close mesh ownership. Withdrawn routes remain captured and
+  closed. Physical recovery validation for this addition is still pending.
 - Imported native flags are validated before upstream's infallible deserializer;
   invalid fields cannot intentionally abort the Java process. Host file sources,
   management portals, exit routes and phone gateway advertisements are rejected.
@@ -64,9 +70,9 @@ is available in `native/easytier-upstream/easytier/LICENSE`.
 1. Actual Wi-Fi TCP outer transport now passes the physical fixture. Audit and
    validate native UDP/STUN/QUIC/DNS transports too; this TCP result is not blanket
    evidence for every native transport or network-switch recovery.
-2. Validate virtual source selection and MTU on Android. Implement interface
-   rebuild/network-switch recovery; the harness currently closes mesh traffic
-   when those changes require a new Android interface.
+2. Validate experimental interface replacement on Android and real network
+   transitions. Forced rebuild tests are not Wi-Fi/cellular transport tests;
+   IPv4 virtual source/MTU already pass on the prior physical APK.
 3. Route HTTP/SOCKS and post-Fake-IP/resolution flows through the same ownership
    policy. A raw destination classifier alone does not cover these flows.
 4. Physical IPv4 TCP/UDP/ICMP, 4096-byte ICMP and generic broadcast/multicast packet

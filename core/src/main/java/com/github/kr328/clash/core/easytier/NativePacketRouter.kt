@@ -15,4 +15,7 @@ object NativePacketRouter {
     external fun start(fd: Int, meshFd: Int, configuration: String, callback: TunInterface): Boolean
     external fun update(snapshot: String, installedAddresses: String): Boolean
     external fun failClosed(generation: Long)
+    external fun suspendInterface(generation: Long): Boolean
+    // Always adopts fd, on success AND failure, exactly as start does.
+    external fun replaceInterface(fd: Int, request: String): Boolean
 }

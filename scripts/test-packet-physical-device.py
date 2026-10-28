@@ -35,6 +35,7 @@ def main():
     parser.add_argument('--lan-fixture', type=Path)
     parser.add_argument('--native-lan-fixture', type=Path)
     parser.add_argument('--discovery-probes-dir', type=Path)
+    parser.add_argument('--rebuild-cycles', type=int, choices=range(0,4), default=0)
     args = parser.parse_args()
     base = [args.adb, '-s', args.serial]
     root = args.test_root.resolve(strict=True)
@@ -70,7 +71,7 @@ def main():
     def adb(*command, **kwargs):
         return call(*base, *command, **kwargs)
     def stage(name, data):
-        assert name in {'physical-consent', 'mesh.toml', 'ci-peer-guard', 'ci-reject-port', 'peer-result.json', 'mode-request.json'}
+        assert name in {'physical-consent', 'mesh.toml', 'ci-peer-guard', 'ci-reject-port', 'peer-result.json', 'mode-request.json', 'rebuild-request'}
         command = "'umask 077; mkdir -p " + FOLDER + '; cat > ' + FOLDER + name + "'"
         subprocess.run(base + ['shell', '-T', 'run-as', PACKAGE, 'sh', '-c', command], input=data, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=20)
     def read(name):
@@ -275,6 +276,30 @@ def main():
                             raise RuntimeError('IPv4 generic discovery failed: '+destination+'/'+direction)
                         print('IPv4 discovery '+destination+' '+direction+': 5/5',flush=True)
                 result['generic_ipv4_discovery_validated']=True
+            rebuilds=[]
+            for sequence in range(1,args.rebuild_cycles+1):
+                original=json.loads(read('status.json'))
+                stage('rebuild-request',str(sequence).encode())
+                deadline=time.monotonic()+20
+                while time.monotonic()<deadline:
+                    state=json.loads(read('status.json'))
+                    if state.get('stage')=='active' and state.get('rebuild_request')==sequence: break
+                    if state.get('stage','').startswith('ET_'): raise RuntimeError('Interface rebuild failed')
+                    time.sleep(.2)
+                else: raise RuntimeError('Interface rebuild timed out')
+                if state['generation']!=original['generation'] or state['interface_revision']<=original['interface_revision']:
+                    raise RuntimeError('Rebuild replaced session or did not replace interface')
+                for protocol,port in [('tcp',30101),('udp',30102)]:
+                    before=len(counters()[protocol])
+                    probe=adb('shell','/data/local/tmp/cmfa-physical-probe',protocol+'-client','10.126.0.1',str(port),timeout=60)
+                    if 'PASS 5/5' not in probe.stdout or counters()[protocol][before:]!=['10.126.0.2']*5:
+                        raise RuntimeError('Mesh did not recover after interface rebuild')
+                probe=docker('ping','-c','5','-W','2','10.126.0.2',timeout=30)
+                if not re.search(r'5 (?:packets )?received',probe.stdout): raise RuntimeError('Inbound ICMP failed after rebuild')
+                if lan: lan_probe('tcp',True); lan_probe('reject',False)
+                rebuilds.append({'cycle':sequence,'outbound_tcp':'5/5','outbound_udp':'5/5','inbound_icmp':'5/5','session_preserved':True})
+                result['checks']['interface_rebuilds']=rebuilds
+                print('Android interface rebuild '+str(sequence)+': TCP/UDP/ICMP 5/5; same mesh session',flush=True)
             stage('peer-result.json', b'{"passed":true}')
             instrumentation.wait(timeout=45)
         log.flush()

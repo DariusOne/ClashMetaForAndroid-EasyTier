@@ -125,3 +125,78 @@ func TestPacketSessionParser(t *testing.T) {
 		t.Fatal("oversized mtu")
 	}
 }
+
+func TestInterfaceRebuildKeepsSessionAndWithdrawnRoutesClosed(t *testing.T) {
+	tunFD, oldApp := packetPair(t)
+	meshFD, native := packetPair(t)
+	h, err := StartPacketSession(tunFD, meshFD, sessionConfig(), &echoTunnel{seen: make(chan *C.Metadata, 8)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	s := router.NativeSnapshot{Schema: 1, Generation: 42, Running: true, Attached: true, Addresses: []string{"10.77.0.2/24"}, Routes: []string{"10.90.0.0/24"}}
+	installed := []netip.Prefix{netip.MustParsePrefix("10.77.0.2/24")}
+	if err := h.ApplySnapshot(s, installed); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := h.SuspendInterface(42); err != nil {
+			t.Fatal(err)
+		}
+		oldApp.Close() // Android closes old TUN while establish is in progress.
+		if h.policy.Decide(netip.MustParseAddr("10.77.0.9")) != router.Drop {
+			t.Fatal("rebuild was not closed")
+		}
+		newFD, newApp := packetPair(t)
+		s.Routes = nil // withdrawn ownership MUST survive, no new Policy/Begin.
+		if err := h.ReplaceInterface(newFD, s, installed, "new-wifi", nil); err != nil {
+			t.Fatal(err)
+		}
+		if h.policy.Decide(netip.MustParseAddr("10.90.0.9")) != router.Drop {
+			t.Fatal("withdrawal fell through")
+		}
+		out := ipFrame([4]byte{10, 77, 0, 2}, [4]byte{10, 77, 0, 9})
+		native.SetReadDeadline(time.Now().Add(time.Second))
+		if _, err := newApp.Write(out); err != nil {
+			t.Fatal(err)
+		}
+		buf := make([]byte, 128)
+		n, err := native.Read(buf)
+		if err != nil || string(buf[:n]) != string(out) {
+			t.Fatalf("same native endpoint did not recover: %v", err)
+		}
+		in := ipFrame([4]byte{10, 77, 0, 9}, [4]byte{10, 77, 0, 2})
+		newApp.SetReadDeadline(time.Now().Add(time.Second))
+		native.Write(in)
+		n, err = newApp.Read(buf)
+		if err != nil || string(buf[:n]) != string(in) {
+			t.Fatalf("new Android interface not used: %v", err)
+		}
+		oldApp = newApp
+	}
+	if err := h.SuspendInterface(42); err != nil {
+		t.Fatal(err)
+	}
+	newFD, _ := packetPair(t)
+	stale := s
+	stale.Generation = 41
+	if h.ReplaceInterface(newFD, stale, installed, "stale", nil) == nil {
+		t.Fatal("stale replacement accepted")
+	}
+	if err := syscall.Close(newFD); err != syscall.EBADF {
+		t.Fatal("rejected FD not adopted/closed")
+	}
+	if h.policy.Decide(netip.MustParseAddr("10.77.0.9")) != router.Drop {
+		t.Fatal("failed replacement reopened routing")
+	}
+	newFD, _ = packetPair(t)
+	if err := h.ReplaceInterface(newFD, s, installed, "overlapping-wifi", []netip.Prefix{netip.MustParsePrefix("10.77.0.0/24")}); err != nil {
+		t.Fatal(err)
+	}
+	if h.policy.Decide(netip.MustParseAddr("10.77.0.9")) != router.Drop {
+		t.Fatal("new LAN overlap inherited approval")
+	}
+	if h.policy.Decide(netip.MustParseAddr("192.168.44.1")) != router.Clash {
+		t.Fatal("unrelated private route changed")
+	}
+}

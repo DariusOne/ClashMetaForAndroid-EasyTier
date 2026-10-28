@@ -64,6 +64,7 @@ class NativeMeshPeerTest {
             File(folder, "peer-result.json").delete()
             File(folder, "mode-request.json").delete()
             File(folder, "mode-ready.json").delete()
+            File(folder, "rebuild-request").delete()
             File(folder, "enable").writeText("packet-path-only")
             context.startForegroundService(Intent(context, TunService::class.java))
             withTimeout(45_000) {
@@ -75,9 +76,9 @@ class NativeMeshPeerTest {
             }
             File(folder, "peer-ready").writeText("ready")
             var sequence = 0
-            withTimeout(if (physicalDevice) 600_000 else 180_000) {
+            withTimeout(if (physicalDevice) 600_000 else 240_000) {
                 while (!File(folder, "peer-result.json").exists()) {
-                    check(stage() == "active") { "Native peer stopped during packet probes" }
+                    check(stage() in listOf("active", "waiting-network", "rebuilding-interface")) { "Native peer stopped during packet probes" }
                     val request = runCatching { JSONObject(File(folder, "mode-request.json").readText()) }.getOrNull()
                     if (request != null && request.optInt("sequence") > sequence) {
                         val mode = when (request.getString("mode")) {
@@ -111,7 +112,7 @@ class NativeMeshPeerTest {
             withTimeoutOrNull(15_000) { while (stage() != "stopped") delay(100) }
             withClash { clearOverride(Clash.OverrideSlot.Session) }
             id?.let { withProfile { delete(it) } }
-            for (name in listOf("enable", "mesh.toml", "ci-peer-guard", "ci-reject-port", "peer-ready", "peer-result.json", "mode-request.json", "mode-ready.json")) File(folder, name).delete()
+            for (name in listOf("enable", "mesh.toml", "ci-peer-guard", "ci-reject-port", "peer-ready", "peer-result.json", "mode-request.json", "mode-ready.json", "rebuild-request")) File(folder, name).delete()
             Remote.service.unbind()
             NativeMeshAcceptanceGuard.closeForeground()
         }

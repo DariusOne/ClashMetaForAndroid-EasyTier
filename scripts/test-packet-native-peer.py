@@ -248,6 +248,34 @@ def main():
                 if ping.returncode or not re.search(r"5 (?:packets )?received", ping.stdout):
                     raise RuntimeError("ICMP roundtrip failed: " + direction)
                 result["checks"]["mesh_" + direction + "_icmp"] = {"passed": 5, "expected": 5}
+            original = json.loads(call("shell", "run-as", PACKAGE, "cat", FOLDER + "status.json"))
+            rebuilds = []
+            for sequence in range(1, 4):
+                stage("rebuild-request", str(sequence))
+                deadline = time.monotonic() + 20
+                while time.monotonic() < deadline:
+                    state = json.loads(call("shell", "run-as", PACKAGE, "cat", FOLDER + "status.json"))
+                    if state.get("stage") == "active" and state.get("rebuild_request") == sequence:
+                        break
+                    if state.get("stage", "").startswith("ET_"):
+                        raise RuntimeError("Interface rebuild failed")
+                    time.sleep(.2)
+                else:
+                    raise RuntimeError("Interface rebuild timed out")
+                if state["generation"] != original["generation"] or state["interface_revision"] <= original["interface_revision"]:
+                    raise RuntimeError("Rebuild replaced mesh session or did not replace interface")
+                for mode in ("tcp", "udp"):
+                    echo = Echo(mode == "udp")
+                    stack.callback(echo.close)
+                    output = call("shell", "/data/local/tmp/cmfa-mesh-probe", mode + "-client", "10.126.0.1", str(echo.port), timeout=60)
+                    if "PASS 5/5" not in output or echo.sources != ["10.126.0.2"] * 5:
+                        raise RuntimeError("Mesh did not recover after interface rebuild")
+                ping = subprocess.run(["ping", "-n", "-c", "5", "-W", "2", "10.126.0.2"], capture_output=True, text=True, timeout=20)
+                if ping.returncode or not re.search(r"5 (?:packets )?received", ping.stdout):
+                    raise RuntimeError("Inbound packets did not recover after rebuild")
+                rebuilds.append({"cycle": sequence, "outbound_tcp": "5/5", "outbound_udp": "5/5", "inbound_icmp": "5/5", "session_preserved": True})
+                original = state
+            result["checks"]["interface_rebuilds"] = rebuilds
             stage("peer-result.json", '{"passed":true}')
             instrument.wait(timeout=30)
             instrumentation.flush()
