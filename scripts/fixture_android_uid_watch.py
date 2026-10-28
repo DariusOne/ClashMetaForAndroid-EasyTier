@@ -10,10 +10,16 @@ COMPONENT = PACKAGE + '/com.github.kr328.clash.HandoverProbeActivity'
 class AndroidUidWatch:
     def __init__(self, adb, sequence, tcp_port, udp_port):
         self.adb, self.sequence = adb, sequence
-        subprocess.run(adb + ['shell','am','start','-W','--activity-clear-task','--activity-new-task',
+        launch = subprocess.run(adb + ['shell','am','start','-W','-f','0x10008000',
             '-n',COMPONENT,'--es','guard','disposable-ci-only','--ei','sequence',str(sequence),
             '--ei','tcpPort',str(tcp_port),'--ei','udpPort',str(udp_port)],
-            capture_output=True, check=True, timeout=10)
+            capture_output=True, text=True, timeout=10)
+        if launch.returncode:
+            combined = launch.stdout + launch.stderr
+            code = ('UNKNOWN_OPTION' if 'Unknown option' in combined else
+                    'ACTIVITY_NOT_FOUND' if 'Error type 3' in combined else
+                    'PERMISSION' if 'Permission Denial' in combined else 'FAILED')
+            raise RuntimeError('Android app UID probe launch: '+code)
 
     def read(self, mode):
         output = subprocess.run(self.adb + ['shell','run-as',PACKAGE,'cat','no_backup/handover-probe/'+mode+'.json'],
