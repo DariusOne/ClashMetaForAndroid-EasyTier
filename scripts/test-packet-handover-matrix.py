@@ -1,5 +1,6 @@
 """Collect a bounded system-setting comparison without waiving either gate."""
 import os
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -16,5 +17,9 @@ for protected in (False,True):
         # Do not start another fixture if a process failed to clean itself up.
         raise RuntimeError('Handover matrix deadline exceeded') from None
     results.append(code)
+    report=script.parent.parent/'app/build/reports'/('native-mesh-peer-lockdown' if protected else 'native-mesh-peer')/'result.json'
+    state=json.loads(report.read_text())
+    if state.get('fixture_cleanup_verified') is not True or state.get('system_lockdown_restore_failed'):
+        raise RuntimeError('Disposable fixture cleanup failed; next mode must not run')
 if any(results):
     raise SystemExit(1)

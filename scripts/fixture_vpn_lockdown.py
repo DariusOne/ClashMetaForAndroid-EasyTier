@@ -61,9 +61,11 @@ class EmulatorLockdown:
         while row in parent and not any(n.get('checkable')=='true' for n in row.iter('node')):
             row=parent[row]
         switches=[n for n in row.iter('node') if n.get('checkable')=='true']
-        if len(switches)!=1 or switches[0].get('enabled')!='true':
+        if len(switches)!=1:
             raise RuntimeError('System VPN switch is unavailable')
         if (switches[0].get('checked')=='true') == enabled: return
+        if switches[0].get('enabled')!='true':
+            raise RuntimeError('System VPN switch is unavailable')
         self.tap(labels[0])
         tree=self.tree()
         buttons=[n for n in tree.iter('node') if n.get('resource-id')=='android:id/button1']

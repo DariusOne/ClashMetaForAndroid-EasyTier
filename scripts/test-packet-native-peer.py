@@ -125,6 +125,17 @@ def main():
         subprocess.run(adb + ["shell", "-T", "run-as", PACKAGE, "sh", "-c", command], input=data.encode(),
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=15)
 
+    def clean_fixture():
+        # Read-only guard: never remove a populated profile store to make a
+        # second run pass. Failed instrumentation must finish its own cleanup.
+        script = 'if [ -d files/imported ]; then ls -A files/imported; fi; '
+        script += 'for f in peer-ready peer-result.json enable; do '
+        script += 'if [ -e no_backup/native-mesh-acceptance/"$f" ]; then echo stale; fi; done'
+        return not call('shell', 'run-as', PACKAGE, 'sh', '-c', shlex.quote(script)).strip()
+
+    if not clean_fixture():
+        raise RuntimeError('Disposable fixture was not clean before this run')
+
     system_guard = os.environ.get('CMFA_SYSTEM_LOCKDOWN_DIAGNOSTIC') == '1'
     report = ROOT / ("app/build/reports/native-mesh-peer-lockdown" if system_guard else "app/build/reports/native-mesh-peer")
     report.mkdir(parents=True, exist_ok=True)
@@ -372,7 +383,11 @@ def main():
                 for _,_,watch in watches: watch.ready()
                 app_echoes = {mode:Echo(mode.startswith("udp")) for mode in APP_MODES}
                 for echo in app_echoes.values(): stack.callback(echo.close)
-                android_uid_watch = AndroidUidWatch(adb, sequence, {mode:echo.port for mode,echo in app_echoes.items()})
+                # The guarded fixture reuses this disposable emulator. Give
+                # its app files a different sequence so a prior ready/done
+                # file can never establish the new run's baseline.
+                app_sequence = sequence + (10 if system_guard else 0)
+                android_uid_watch = AndroidUidWatch(adb, app_sequence, {mode:echo.port for mode,echo in app_echoes.items()})
                 android_uid_watch.ready()
                 bionic_watches = []
                 for mode in ("tcp", "udp"):
@@ -477,6 +492,14 @@ def main():
                     stage("peer-result.json", '{"passed":false}')
                 except Exception:
                     pass
+            # The Android test owns the disposable profile. Killing adb here
+            # interrupts its finally block and leaves a live profile/ready file
+            # that could falsely satisfy the next run's startup check.
+            if instrument is not None and instrument.poll() is None:
+                try:
+                    instrument.wait(timeout=40)
+                except subprocess.TimeoutExpired:
+                    result['fixture_cleanup_failed'] = True
             for child in helpers + ([instrument] if instrument else []):
                 if child.poll() is None:
                     child.terminate()
@@ -485,6 +508,13 @@ def main():
                     except subprocess.TimeoutExpired:
                         child.kill()
                         child.wait(timeout=5)
+            try:
+                result['fixture_cleanup_verified'] = clean_fixture()
+            except (OSError, subprocess.SubprocessError):
+                result['fixture_cleanup_verified'] = False
+            if not result['fixture_cleanup_verified']:
+                result['passed'] = False
+                result['fixture_cleanup_failed'] = True
             if android_uid_watch is not None:
                 try: android_uid_watch.close()
                 except (OSError, subprocess.SubprocessError):
