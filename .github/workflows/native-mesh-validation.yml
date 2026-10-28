@@ -75,6 +75,8 @@ jobs:
         run: python3 scripts/test_fixture_file_stage.py
       - name: Continuous handover probe bounds and wrong-source regression
         run: go test -count=1 scripts/fixtures/transition_probe.go scripts/fixtures/transition_probe_test.go
+      - name: NDK counterpart host deadline and wrong-source regression
+        run: python3 scripts/test_transition_c_probe.py
       - name: Real TCP and UDP through the Mihomo packet adapter
         working-directory: core/src/main/golang
         env:

@@ -133,6 +133,10 @@ def main():
                            env={**os.environ, "GOOS":"linux", "GOARCH":"amd64", "CGO_ENABLED":"0"},check=True)
             call("push", str(transition), "/data/local/tmp/cmfa-transition-probe")
             call("shell", "chmod", "700", "/data/local/tmp/cmfa-transition-probe")
+            bionic = temp / "cmfa-bionic-transition-probe"
+            subprocess.run([str(clang), "-Wall", "-Wextra", "-Werror", "-O2", str(ROOT / "scripts/fixtures/transition_probe.c"), "-o", str(bionic)], check=True)
+            call("push", str(bionic), "/data/local/tmp/cmfa-bionic-transition-probe")
+            call("shell", "chmod", "700", "/data/local/tmp/cmfa-bionic-transition-probe")
             with socket.socket() as reserve:
                 reserve.bind(("127.0.0.1", 0))
                 port = reserve.getsockname()[1]
@@ -331,6 +335,14 @@ def main():
                 for echo in app_echoes.values(): stack.callback(echo.close)
                 android_uid_watch = AndroidUidWatch(adb, sequence, app_echoes["tcp"].port, app_echoes["udp"].port)
                 android_uid_watch.ready()
+                bionic_watches = []
+                for mode in ("tcp", "udp"):
+                    echo = Echo(mode == "udp")
+                    stack.callback(echo.close)
+                    watch = TransitionWatch(adb + ["shell", "/data/local/tmp/cmfa-bionic-transition-probe", mode, str(echo.port)])
+                    transition_watches.append(watch)
+                    bionic_watches.append((mode, echo, watch))
+                for _,_,watch in bionic_watches: watch.ready()
                 stage("rebuild-request", str(sequence))
                 deadline = time.monotonic() + 20
                 while time.monotonic() < deadline:
@@ -349,13 +361,17 @@ def main():
                 cycle["transition"] = {}
                 covered = all(w.process.poll() is None for _,_,w in watches)
                 app_covered = android_uid_watch.running()
+                bionic_covered = all(w.process.poll() is None for _,_,w in bionic_watches)
                 for mode,echo,watch in watches:
                     cycle["transition"][mode] = watch.finish(lambda echo=echo:list(echo.sources))
                 cycle["transition_covered_ready"] = covered
                 cycle["android_app_covered_ready"] = app_covered
                 cycle["android_app_transition"] = android_uid_watch.finish({mode:lambda echo=echo:list(echo.sources) for mode,echo in app_echoes.items()})
+                cycle["bionic_shell_covered_ready"] = bionic_covered
+                cycle["bionic_shell_transition"] = {mode:watch.finish(lambda echo=echo:list(echo.sources)) for mode,echo,watch in bionic_watches}
                 if (not covered or not app_covered or not all(x["passed"] for x in cycle["transition"].values())
-                        or not all(x["passed"] for x in cycle["android_app_transition"].values())):
+                        or not all(x["passed"] for x in cycle["android_app_transition"].values())
+                        or not bionic_covered or not all(x["passed"] for x in cycle["bionic_shell_transition"].values())):
                     raise RuntimeError("Continuous handover packet/source assertion failed")
                 for mode in ("tcp", "udp"):
                     echo = Echo(mode == "udp")
@@ -444,6 +460,7 @@ def main():
             call("shell", "am", "force-stop", PACKAGE)
             call("shell", "rm", "-f", "/data/local/tmp/cmfa-mesh-probe")
             call("shell", "rm", "-f", "/data/local/tmp/cmfa-transition-probe")
+            call("shell", "rm", "-f", "/data/local/tmp/cmfa-bionic-transition-probe")
             print(json.dumps(result), flush=True)
 
 
