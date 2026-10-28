@@ -113,6 +113,7 @@ class NativeMeshPeerTest {
             id?.let { withProfile { delete(it) } }
             for (name in listOf("enable", "mesh.toml", "ci-peer-guard", "ci-reject-port", "peer-ready", "peer-result.json", "mode-request.json", "mode-ready.json")) File(folder, name).delete()
             Remote.service.unbind()
+            NativeMeshAcceptanceGuard.closeForeground()
         }
     }
 }

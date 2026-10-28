@@ -56,6 +56,28 @@ automatic network-switch recovery or generator release is claimed. Keep these
 rows unpassed in DEVICE-ACCEPTANCE.md. Do not distribute this artifact as a
 completed CMFA/EasyTier replacement.
 
+## Explicit physical-device fixture
+
+CI also publishes the matching instrumentation APK and arm64 probe as
+`physical-device-test-tools-NOT-acceptance-results`. This is executable test
+equipment, not proof of a phone test. Verify the archive digests and use the
+prototype and test APK from the same run (their debug signing keys must match).
+
+`scripts/test-packet-physical-device.py` supports a real phone only when explicitly
+selected with `--serial`, with an empty separate prototype profile store and a
+one-use private consent marker. It requests Android's normal VPN permission;
+it does not use appops to bypass that prompt. Record and restore the existing
+VPN state. Never clear the original CMFA or EasyTier app to make a fixture pass.
+
+The peer fixture uses a disposable Linux container with its own network/TUN,
+not a production mesh. Only localhost publishes the native peer's TCP listener;
+an explicitly tracked adb reverse mapping carries that underlay to the phone.
+`physical_peer.js` and `physical_peer_client.js` provide synthetic echo traffic.
+Both sets of network identities remain in a local user-only test directory.
+USB underlay success does not prove Wi-Fi/cellular recovery or physical LAN
+discovery. The result keeps DNS/Fake-IP, discovery, IPv6 and complete integration
+false until their separate cases have actually run.
+
 To return this separate prototype to normal CMFA behavior, stop its VPN and
 remove only `no_backup/native-mesh-acceptance/enable` using run-as, or clear the
 prototype's app data. Neither action is needed for the user's original CMFA.

@@ -106,6 +106,7 @@ class NativeMeshSmokeTest {
             File(folder, "enable").delete()
             File(folder, "mesh.toml").delete()
             Remote.service.unbind()
+            NativeMeshAcceptanceGuard.closeForeground()
         }
     }
 

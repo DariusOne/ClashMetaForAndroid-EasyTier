@@ -2,6 +2,7 @@ package com.github.kr328.clash
 
 import android.content.Intent
 import android.net.VpnService
+import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 import java.util.UUID
@@ -12,6 +13,10 @@ import kotlinx.coroutines.withTimeout
  * prototype's private storage. It never grants VPN consent with appops, accesses
  * another application's data, or accepts a populated prototype profile store. */
 internal object NativeMeshAcceptanceGuard {
+    private var foreground: ActivityScenario<MainActivity>? = null
+
+    fun closeForeground() { foreground?.close(); foreground = null }
+
     suspend fun verify(): Boolean {
         val registry = InstrumentationRegistry.getInstrumentation()
         val context = registry.targetContext
@@ -31,10 +36,16 @@ internal object NativeMeshAcceptanceGuard {
         check(marker.isFile && marker.length() <= 64 && marker.readText().trim() == token) { "ET_TEST_CONSENT_INVALID" }
         // Single use: repeating a destructive fixture requires explicit staging.
         check(marker.delete()) { "ET_TEST_CONSENT_INVALID" }
-        VpnService.prepare(context)?.let {
-            context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            withTimeout(120_000) { while (VpnService.prepare(context) != null) delay(250) }
-        }
+        try {
+            // VPN confirmation identifies its caller through an Activity result;
+            // a background Context.startActivity has no such caller and may be
+            // blocked or immediately dismissed by a physical device's system UI.
+            foreground = ActivityScenario.launch(Intent(context, MainActivity::class.java))
+            VpnService.prepare(context)?.let { request ->
+                foreground!!.onActivity { it.startActivityForResult(request, 20052) }
+                withTimeout(120_000) { while (VpnService.prepare(context) != null) delay(250) }
+            }
+        } catch (e: Throwable) { closeForeground(); throw e }
         return true
     }
 }
