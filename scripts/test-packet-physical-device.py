@@ -19,6 +19,7 @@ import time
 import tomllib
 import uuid
 from fixture_file_stage import atomic_stage_script
+from fixture_transition_watch import TransitionWatch
 
 PACKAGE = 'com.github.metacubex.clash.meshprototype.meta'
 FOLDER = 'no_backup/native-mesh-acceptance/'
@@ -40,7 +41,10 @@ def main():
     parser.add_argument('--rebuild-cycles', type=int, choices=range(0,4), default=0)
     parser.add_argument('--wifi-return-cycles', type=int, choices=range(0,4), default=0)
     parser.add_argument('--proxy-fixture', type=Path)
+    parser.add_argument('--transition-probe', type=Path)
     args = parser.parse_args()
+    if args.transition_probe and (args.phase != 'peer' or not args.rebuild_cycles):
+        parser.error('Transition probe requires peer phase and interface rebuild cycles')
     base = [args.adb, '-s', args.serial]
     root = args.test_root.resolve(strict=True)
     lan = None
@@ -111,6 +115,7 @@ def main():
               'physical_transport':('none (local lifecycle)' if args.phase=='lifecycle' else ('Wi-Fi TCP through private LAN fixture to isolated Linux native peer' if native_lan else 'USB reverse to isolated Linux native peer')), 'checks':{}}
     instrumentation = None
     helpers = []
+    transition_watches = []
     reverse_created = False
     discovery_staged = False
     restore_wifi = False
@@ -129,6 +134,9 @@ def main():
                 reverse_created = True
             adb('push', str(args.probe.resolve(strict=True)), '/data/local/tmp/cmfa-physical-probe')
             adb('shell', 'chmod', '700', '/data/local/tmp/cmfa-physical-probe')
+            if args.transition_probe:
+                adb('push', str(args.transition_probe.resolve(strict=True)), '/data/local/tmp/cmfa-transition-probe')
+                adb('shell', 'chmod', '700', '/data/local/tmp/cmfa-transition-probe')
             if args.discovery_probes_dir:
                 probes=args.discovery_probes_dir.resolve(strict=True)
                 discovery_staged=True
@@ -296,8 +304,19 @@ def main():
                         print('IPv4 discovery '+destination+' '+direction+': 5/5',flush=True)
                 result['generic_ipv4_discovery_validated']=True
             rebuilds=[]
+            result['checks']['interface_rebuilds']=rebuilds
             for sequence in range(1,args.rebuild_cycles+1):
+                cycle={'cycle':sequence,'passed':False}
+                rebuilds.append(cycle)
                 original=json.loads(read('status.json'))
+                watches=[]
+                if args.transition_probe:
+                    for protocol,port in [('tcp',30101),('udp',30102)]:
+                        before=len(counters()[protocol])
+                        watch=TransitionWatch(base+['shell','/data/local/tmp/cmfa-transition-probe',protocol,str(port)])
+                        transition_watches.append(watch)
+                        watches.append((protocol,before,watch))
+                    for _,_,watch in watches: watch.ready()
                 stage('rebuild-request',str(sequence).encode())
                 deadline=time.monotonic()+20
                 while time.monotonic()<deadline:
@@ -308,6 +327,14 @@ def main():
                 else: raise RuntimeError('Interface rebuild timed out')
                 if state['generation']!=original['generation'] or state['interface_revision']<=original['interface_revision']:
                     raise RuntimeError('Rebuild replaced session or did not replace interface')
+                if watches:
+                    cycle['transition']={}
+                    covered=all(w.process.poll() is None for _,_,w in watches)
+                    for protocol,before,watch in watches:
+                        cycle['transition'][protocol]=watch.finish(lambda protocol=protocol,before=before:counters()[protocol][before:])
+                    cycle['transition_covered_ready']=covered
+                    if not covered or not all(x['passed'] for x in cycle['transition'].values()):
+                        raise RuntimeError('Continuous handover packet/source assertion failed')
                 for protocol,port in [('tcp',30101),('udp',30102)]:
                     before=len(counters()[protocol])
                     probe=adb('shell','/data/local/tmp/cmfa-physical-probe',protocol+'-client','10.126.0.1',str(port),timeout=60)
@@ -316,7 +343,7 @@ def main():
                 probe=docker('ping','-c','5','-W','2','10.126.0.2',timeout=30)
                 if not re.search(r'5 (?:packets )?received',probe.stdout): raise RuntimeError('Inbound ICMP failed after rebuild')
                 if lan: lan_probe('tcp',True); lan_probe('reject',False)
-                rebuilds.append({'cycle':sequence,'outbound_tcp':'5/5','outbound_udp':'5/5','inbound_icmp':'5/5','session_preserved':True})
+                cycle.update({'passed':True,'outbound_tcp':'5/5','outbound_udp':'5/5','inbound_icmp':'5/5','session_preserved':True})
                 result['checks']['interface_rebuilds']=rebuilds
                 print('Android interface rebuild '+str(sequence)+': TCP/UDP/ICMP 5/5; same mesh session',flush=True)
             if args.wifi_return_cycles:
@@ -407,6 +434,7 @@ def main():
         if type(error) is RuntimeError: result['failure']=str(error)
         raise
     finally:
+        for watch in transition_watches: watch.close()
         if not result['passed']:
             try:
                 crash=adb('shell','run-as',PACKAGE,'dd','if=files/clash/native-mesh-crash.txt','bs=65536','count=64',check=False,timeout=15).stdout
@@ -446,6 +474,9 @@ def main():
         if args.phase=='peer':
             try: adb('shell','rm','-f','/data/local/tmp/cmfa-physical-probe',timeout=15)
             except Exception: cleanup_errors.append('test_probe_removal_unconfirmed')
+        if args.transition_probe:
+            try: adb('shell','rm','-f','/data/local/tmp/cmfa-transition-probe',timeout=15)
+            except Exception: cleanup_errors.append('transition_probe_removal_unconfirmed')
         if discovery_staged:
             try:
                 adb('shell','rm','-f','/data/local/tmp/cmfa-discovery-probe',timeout=15)

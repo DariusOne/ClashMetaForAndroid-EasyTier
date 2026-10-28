@@ -145,3 +145,10 @@ are restricted to the disposable CI mesh, not the user's network.
 To return this separate prototype to normal CMFA behavior, stop its VPN and
 remove only `no_backup/native-mesh-acceptance/enable` using run-as, or clear the
 prototype's app data. Neither action is needed for the user's original CMFA.
+
+`--transition-probe` optionally adds the bounded `transition_probe.go` executable
+to a physical run with `--rebuild-cycles`. CI runs it for all three rebuilds.
+It starts before replacement, counts failed requests as blocked, and rejects
+wrong source addresses even if payloads succeed. It must still be running when
+the readiness barrier acknowledges the replacement. These are additional
+observations; they do not relax the subsequent 5/5 recovery requirements.

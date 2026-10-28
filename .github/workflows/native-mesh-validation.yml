@@ -73,6 +73,8 @@ jobs:
         run: python3 scripts/test_physical_socks_peer.py
       - name: Atomic Android fixture publication regression
         run: python3 scripts/test_fixture_file_stage.py
+      - name: Continuous handover probe bounds and wrong-source regression
+        run: go test -count=1 scripts/fixtures/transition_probe.go scripts/fixtures/transition_probe_test.go
       - name: Real TCP and UDP through the Mihomo packet adapter
         working-directory: core/src/main/golang
         env:
@@ -187,6 +189,7 @@ jobs:
           mkdir -p app/build/physical-device-tools
           "$ANDROID_HOME/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" -Wall -Wextra -Werror -O2 scripts/fixtures/mesh_probe.c -o app/build/physical-device-tools/cmfa-mesh-probe-arm64
           GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o app/build/physical-device-tools/discovery-probe-arm64 scripts/fixtures/discovery_probe.go
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o app/build/physical-device-tools/transition-probe-arm64 scripts/fixtures/transition_probe.go
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o app/build/physical-device-tools/discovery-probe-amd64 scripts/fixtures/discovery_probe.go
       - name: Enable KVM for disposable CI emulator
         run: |

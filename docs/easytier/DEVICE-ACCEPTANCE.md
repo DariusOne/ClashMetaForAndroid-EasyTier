@@ -54,6 +54,22 @@ the last working configuration and fix/retest the failing path.
 
 ## Current status
 
+Commit `ea1673b62fdb7cd9d2666fa7bb7fd4cb4c4d3cf2` passed Native CI
+`40647125042`, normal build `40647131073`, and the matching physical Android
+retest. The latter covered bidirectional TCP/UDP/ICMP and 4096-byte ICMP,
+nonmesh Direct/Global/Rule, authenticated proxy and bypass-private off/on/off,
+and three interface rebuilds. Every post-ready five-request assertion passed,
+including virtual-source checks. The prototype VPN, profile, probes and owned
+LAN/container fixtures were cleaned up. This is NOT continuous-handover proof.
+
+The continuous transition fixture starts bounded TCP/UDP probes before asking
+for a rebuild and requires them to remain active until the new interface is
+ready. It records blocked requests separately and rejects any wrong source in
+completed sockets or peer-observed connections/datagrams. Post-ready strict
+5/5 tests remain separate. This finite fixture does not inspect every rejected
+SYN on an underlay and does not establish an OS-wide lockdown guarantee.
+Until its results are recorded, continuous handover remains unaccepted.
+
 The first physical arm64 Android 17 fixture was executed on 2026-10-28 using
 prototype commit `46f358e0dd3ed3288e31186567fba2224db5ff13` and a private,
 disposable Linux peer. Ten start/stop cycles and native-child crash isolation

@@ -22,6 +22,7 @@ import urllib.request
 import uuid
 import zipfile
 from fixture_file_stage import atomic_stage_script
+from fixture_transition_watch import TransitionWatch
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "com.github.metacubex.clash.meshprototype.meta"
@@ -103,6 +104,7 @@ def main():
               "dns_fakeip_validated": False, "discovery_validated": False, "checks": {}}
     peer = instrument = instrumentation = capture = None
     helpers = []
+    transition_watches = []
     with tempfile.TemporaryDirectory(prefix="cmfa-native-peer-") as temp, ExitStack() as stack:
         temp = Path(temp)
         os.chmod(temp, 0o700)
@@ -124,6 +126,11 @@ def main():
             subprocess.run([str(clang), "-Wall", "-Wextra", "-Werror", "-O2", str(ROOT / "scripts/fixtures/mesh_probe.c"), "-o", str(probe)], check=True)
             call("push", str(probe), "/data/local/tmp/cmfa-mesh-probe")
             call("shell", "chmod", "700", "/data/local/tmp/cmfa-mesh-probe")
+            transition = temp / "cmfa-transition-probe"
+            subprocess.run(["go", "build", "-trimpath", "-o", str(transition), str(ROOT / "scripts/fixtures/transition_probe.go")],
+                           env={**os.environ, "GOOS":"linux", "GOARCH":"amd64", "CGO_ENABLED":"0"},check=True)
+            call("push", str(transition), "/data/local/tmp/cmfa-transition-probe")
+            call("shell", "chmod", "700", "/data/local/tmp/cmfa-transition-probe")
             with socket.socket() as reserve:
                 reserve.bind(("127.0.0.1", 0))
                 port = reserve.getsockname()[1]
@@ -262,6 +269,14 @@ def main():
             for sequence in range(1, 4):
                 cycle = {"cycle": sequence, "passed": False, "protocols": {}}
                 rebuilds.append(cycle)
+                watches = []
+                for mode in ("tcp", "udp"):
+                    echo = Echo(mode == "udp")
+                    stack.callback(echo.close)
+                    watch = TransitionWatch(adb + ["shell", "/data/local/tmp/cmfa-transition-probe", mode, str(echo.port)])
+                    transition_watches.append(watch)
+                    watches.append((mode,echo,watch))
+                for _,_,watch in watches: watch.ready()
                 stage("rebuild-request", str(sequence))
                 deadline = time.monotonic() + 20
                 while time.monotonic() < deadline:
@@ -277,6 +292,13 @@ def main():
                     raise RuntimeError("Rebuild replaced mesh session or did not replace interface")
                 cycle["session_preserved"] = True
                 cycle["interface_revision"] = state["interface_revision"]
+                cycle["transition"] = {}
+                covered = all(w.process.poll() is None for _,_,w in watches)
+                for mode,echo,watch in watches:
+                    cycle["transition"][mode] = watch.finish(lambda echo=echo:list(echo.sources))
+                cycle["transition_covered_ready"] = covered
+                if not covered or not all(x["passed"] for x in cycle["transition"].values()):
+                    raise RuntimeError("Continuous handover packet/source assertion failed")
                 for mode in ("tcp", "udp"):
                     echo = Echo(mode == "udp")
                     stack.callback(echo.close)
@@ -312,6 +334,7 @@ def main():
                 raise RuntimeError("Android peer lifecycle assertion failed")
             result["passed"] = True
         finally:
+            for watch in transition_watches: watch.close()
             if not result["passed"]:
                 try:
                     stage("peer-result.json", '{"passed":false}')
@@ -352,6 +375,7 @@ def main():
             (report / "result.json").write_text(json.dumps(result, indent=2) + "\n")
             call("shell", "am", "force-stop", PACKAGE)
             call("shell", "rm", "-f", "/data/local/tmp/cmfa-mesh-probe")
+            call("shell", "rm", "-f", "/data/local/tmp/cmfa-transition-probe")
             print(json.dumps(result), flush=True)
 
 
