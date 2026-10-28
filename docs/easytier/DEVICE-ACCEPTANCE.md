@@ -200,3 +200,10 @@ when addresses/routes change; it does not supply an atomic public address/route
 update mechanism to reuse. A separate `diagnostics/android11-dropvpn` workflow
 now removes both engines from the experiment and tests a discard-only public-API
 VPN. Its result is diagnostic and cannot relax the native acceptance gate.
+
+That control is now complete: `b0ab618` / run `40678664929` passed fixture
+validity, before/after reachability and cleanup, but failed containment. Its
+discard-only VPN allowed 23 peer connections/datagrams and 13 replies during
+12 interface replacements; the no-replacement baseline allowed zero. See
+[the full evidence and limits](ANDROID11-HANDOVER.md). No setting-dependent
+workaround was adopted; Android 11 dynamic interface compatibility remains open.
