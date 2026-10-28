@@ -1,5 +1,10 @@
 # Android 11 interface handover: unresolved compatibility gate
 
+Historical record: on 2026-10-28 the user changed the integration's minimum
+supported version to Android 12. Android 11 is therefore outside that range;
+the failure evidence is preserved. Android 12+ still requires its own strict
+handover verification, without changing existing user settings.
+
 The required behavior remains unchanged: only active EasyTier destinations use
 the mesh; unrelated traffic keeps CMFA policy, including private-network bypass
 and application exclusions. Do not require always-on/lockdown or explicit manual

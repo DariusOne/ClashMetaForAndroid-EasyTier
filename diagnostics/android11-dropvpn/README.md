@@ -1,10 +1,16 @@
 # Android 11 drop-only public API control
 
+The directory name preserves the original reproduction. The active CI matrix
+now uses API 31 and API 35 for the requested Android 12+ integration target.
+`CMFA_CONTROL_API` selects only a disposable test image (30, 31 or 35), never a
+phone or product setting. Historical API 30 evidence is retained. The Java
+fixture's foreground-service declaration also supports the API 35 control.
+
 This is a diagnostic, not a new product mode or workaround. The user rejected
 always-on/lockdown prerequisites, disabling private-network bypass, disabling
 app exclusions and manual reconnect. Those requirements remain unchanged.
 
-The dedicated workflow creates a new API 30 emulator, compiles two tiny Java
+The dedicated workflow creates a new explicitly selected emulator, compiles two tiny Java
 APKs without CMFA, Mihomo or EasyTier libraries, and uses only public VPN APIs.
 The VPN discards every packet it receives and never writes to its interface or
 opens an outgoing socket. An independent app UID runs TCP/UDP requests to one

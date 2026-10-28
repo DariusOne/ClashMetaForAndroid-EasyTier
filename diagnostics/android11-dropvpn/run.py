@@ -1,4 +1,4 @@
-"""Bounded public-API control on a NEW GitHub Android 11 emulator only.
+"""Bounded public-API control on a NEW, explicitly selected GitHub emulator.
 
 Builds two tiny Java APKs without Gradle, native libraries, Mihomo or EasyTier.
 The first only discards packets; the second uses ordinary app-UID sockets.
@@ -45,6 +45,7 @@ def build_apk(folder, sdk, package, sources, application, key):
 <uses-permission android:name="android.permission.INTERNET"/>
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
 <queries><package android:name="com.github.metacubex.clash.meshprototype.meta"/></queries>
 <application android:debuggable="true" android:label="Disposable VPN diagnostic">{application}</application>
 </manifest>''', encoding='utf-8')
@@ -63,6 +64,9 @@ def build_apk(folder, sdk, package, sources, application, key):
 def main():
     if os.environ.get('GITHUB_ACTIONS') != 'true' or os.name != 'posix':
         raise RuntimeError('New disposable GitHub emulator only')
+    expected_api = os.environ.get('CMFA_CONTROL_API', '31')
+    if expected_api not in ('30', '31', '35'):
+        raise RuntimeError('Unsupported diagnostic API')
     devices = re.findall(r'^(emulator-\d+)\s+device$', run(['adb', 'devices']), re.M)
     if len(devices) != 1: raise RuntimeError('One disposable emulator required')
     adb = ['adb', '-s', devices[0]]
@@ -70,7 +74,7 @@ def main():
         value = subprocess.run(adb + ['shell', 'pm', 'path', package], text=True, capture_output=True, timeout=10)
         if value.returncode not in (0, 1): raise RuntimeError('Package inventory failed')
         return 'package:' in value.stdout
-    if run(adb + ['shell', 'getprop', 'ro.kernel.qemu']).strip() != '1' or run(adb + ['shell', 'getprop', 'ro.build.version.sdk']).strip() != '30':
+    if run(adb + ['shell', 'getprop', 'ro.kernel.qemu']).strip() != '1' or run(adb + ['shell', 'getprop', 'ro.build.version.sdk']).strip() != expected_api:
         raise RuntimeError('Real devices and other platforms forbidden')
     for package in (PACKAGE, TEST_PACKAGE):
         if present(package):
@@ -82,7 +86,7 @@ def main():
     if any(a.get('local') == '10.126.0.1' for row in addresses for a in row.get('addr_info', [])):
         raise RuntimeError('Synthetic fixture address already exists')
     REPORT.mkdir(parents=True, exist_ok=True)
-    result = {'kind': 'public-api-drop-only-vpn', 'api': 30, 'engines_loaded': [],
+    result = {'kind': 'public-api-drop-only-vpn', 'api': int(expected_api), 'engines_loaded': [],
               'system_settings_changed': False, 'contained': False, 'complete_integration': False,
               'real_device_validated': False, 'windows': []}
     installed, alias = [], False
@@ -98,7 +102,8 @@ def main():
                  '-alias', 'fixture', '-dname', 'CN=Disposable fixture', '-keyalg', 'RSA', '-validity', '1'])
             apk = build_apk(tmp / 'vpn', sdk, PACKAGE, list(Path(__file__).parent.glob('*.java')),
                 '<activity android:name="fixture.dropvpn.DropVpnActivity" android:exported="true"/>'
-                '<service android:name="fixture.dropvpn.DropVpnService" android:permission="android.permission.BIND_VPN_SERVICE" android:exported="false">'
+                '<service android:name="fixture.dropvpn.DropVpnService" android:permission="android.permission.BIND_VPN_SERVICE" android:exported="false" android:foregroundServiceType="specialUse">'
+                '<property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="vpn"/>'
                 '<intent-filter><action android:name="android.net.VpnService"/></intent-filter></service>', key)
             # A drop-only request spends its entire deadline waiting. Shorten
             # ONLY this copy's per-request timeout so the finite window samples

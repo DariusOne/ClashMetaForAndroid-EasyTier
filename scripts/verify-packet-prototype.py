@@ -27,6 +27,9 @@ def main():
     package = re.search(r"^package: name='([^']+)'", badging, re.M)
     if not package or package[1] != "com.github.metacubex.clash.meshprototype.meta":
         raise RuntimeError("Prototype must have a separate application identity")
+    minimum = re.search(r"^sdkVersion:'(\d+)'", badging, re.M)
+    if not minimum or int(minimum[1]) != 31:
+        raise RuntimeError("Native integration APK must require Android 12 / API 31")
     manifest = subprocess.check_output([str(tools[-1]), "dump", "xmltree", str(apk), "AndroidManifest.xml"], text=True)
     if sum('"android.net.VpnService"' in line for line in manifest.splitlines()) != 1 or '":native_mesh"' not in manifest:
         raise RuntimeError("Unexpected VPN/engine process manifest")
@@ -46,11 +49,11 @@ def main():
                     if hashlib.sha256(original.read_bytes()).hexdigest() != stamp["sha256"]:
                         raise RuntimeError("Input native artifact changed")
                 libraries[f"{abi}/{name}"] = {"sha256": digest, "bytes": len(data)}
-    result = {"schema": 1, "package": package[1], "apk_sha256": hashlib.sha256(apk.read_bytes()).hexdigest(),
+    result = {"schema": 1, "package": package[1], "min_sdk": int(minimum[1]), "apk_sha256": hashlib.sha256(apk.read_bytes()).hexdigest(),
               "native_libraries": libraries, "kind": "packet-path-development-prototype",
               "complete_integration": False, "device_validated": False}
     (output / "prototype-verification.json").write_text(json.dumps(result, indent=2)+"\n", encoding="utf-8")
-    print(json.dumps({"package": package[1], "native_payloads": len(libraries), "device_validated": False}))
+    print(json.dumps({"package": package[1], "min_sdk": int(minimum[1]), "native_payloads": len(libraries), "device_validated": False}))
 
 
 if __name__ == "__main__":

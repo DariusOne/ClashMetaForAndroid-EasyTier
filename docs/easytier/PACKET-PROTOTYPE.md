@@ -1,7 +1,10 @@
 # Packet-path prototype (not the finished application)
 
 This harness exists to make the native packet path testable before UI/generator
-rollout. Normal builds do not enable it. CI builds the opt-in variant with:
+rollout. The integrated APK requires **Android 12 / API 31 or later**, enforced
+in its manifest and at native-harness entry. The independent upstream-like
+proxy-only build retains its existing minimum API. Normal builds do not enable
+the integration. CI builds the opt-in variant with:
 
 ```
 python3 scripts/build-easytier-android.py --abi arm64-v8a
@@ -21,7 +24,7 @@ working CMFA. It has one VpnService and a separate, unexported native engine
 process. Its native JNI libraries are verified before packaging. Compile success
 and the APK manifest check are not phone or networking acceptance.
 
-CI also contains an Android API 30 x86_64 emulator lifecycle test: a newly
+CI also contains an Android API 31 x86_64 emulator lifecycle test: a newly
 created local-only profile starts and stops the single VPN ten times, checks
 native startup and Android mesh address installation/removal, kills only the
 disposable native child on the last cycle to check VPN-owner survival, and saves its
@@ -65,6 +68,12 @@ No production combined-mode, proxy-only/mesh-only switching, profile editor
 or generator release is claimed. Keep these
 rows unpassed in DEVICE-ACCEPTANCE.md. Do not distribute this artifact as a
 completed CMFA/EasyTier replacement.
+
+Android 11 evidence below is historical and remains available for diagnosis;
+it is outside the newly requested native integration support range. Raising
+the minimum does not prove that Android 12+ handover is safe. The ordinary
+settings test remains strict, with no always-on/lockdown prerequisite. The
+small independent control additionally runs on API 31 and API 35.
 
 ## Explicit physical-device fixture
 

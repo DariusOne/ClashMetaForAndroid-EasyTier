@@ -58,7 +58,9 @@ subprojects {
                 else "com.github.kr328.clash.$name"
             }
 
-            minSdk = 21
+            // Native combined mode supports Android 12+; the upstream-like
+            // proxy-only build keeps its independent compatibility contract.
+            minSdk = if (nativeMeshHarness) 31 else 21
             targetSdk = 35
 
             versionName = "2.11.36"

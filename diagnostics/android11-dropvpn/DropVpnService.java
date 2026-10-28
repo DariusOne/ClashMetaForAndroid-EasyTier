@@ -38,7 +38,7 @@ public final class DropVpnService extends VpnService {
     private int sequence;
 
     static boolean allowed(Context context) {
-        return Build.VERSION.SDK_INT == 30 &&
+        return (Build.VERSION.SDK_INT == 30 || Build.VERSION.SDK_INT == 31 || Build.VERSION.SDK_INT == 35) &&
                 ("ranchu".equals(Build.HARDWARE) || "goldfish".equals(Build.HARDWARE)) &&
                 (context.getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0 &&
                 "com.github.metacubex.clash.meshprototype.meta".equals(context.getPackageName());

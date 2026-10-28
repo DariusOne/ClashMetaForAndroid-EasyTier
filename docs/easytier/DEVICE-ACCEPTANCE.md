@@ -1,5 +1,13 @@
 # Device acceptance gate (not yet passed)
 
+As requested on 2026-10-28, native integration now targets **Android 12+ (API 31)**.
+The integrated APK's minimum API and runtime guard reject older versions. The
+independent normal CMFA build is unchanged. Android 11 results below remain
+historical evidence, not a current support requirement. Fresh API 31 native
+handover and API 31/35 public-API controls are required before proceeding;
+raising the minimum alone is not acceptance. Existing routing, bypass-private,
+per-app selection and no-extra-system-setting requirements remain unchanged.
+
 Use a separate test APK/application ID and a disposable mesh profile. Never copy
 real subscriptions, mesh secrets, endpoint lists, TOTP or VPS keys into this repo,
 CI, command-line arguments or logs. Do not install over the user's working CMFA.
@@ -52,7 +60,7 @@ the last working configuration and fix/retest the failing path.
   preserving their current outputs. No embedded server/admin/Cloudflare secrets.
 - Private files retain Windows user-only ACL or Linux 0600/0700.
 
-## Current status
+## Prior validation history
 
 Commit `ea1673b62fdb7cd9d2666fa7bb7fd4cb4c4d3cf2` passed Native CI
 `40647125042`, normal build `40647131073`, and the matching physical Android
