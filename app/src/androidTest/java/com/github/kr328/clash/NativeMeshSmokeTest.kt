@@ -23,18 +23,16 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Disposable emulator-only lifecycle test. No production peer, subscription
- * or user's VPN is accessed. This is NOT device/peer packet acceptance. */
+/** Lifecycle fixture for an empty, separate prototype. Real-device execution
+ * additionally requires a one-use private marker and Android VPN consent. */
 @RunWith(AndroidJUnit4::class)
 class NativeMeshSmokeTest {
     private val context: Context get() = InstrumentationRegistry.getInstrumentation().targetContext
     private val folder get() = File(context.noBackupFilesDir, "native-mesh-acceptance")
 
     @Test fun singleOwnerStartsAndStopsTenTimes() = runBlocking {
-        check(BuildConfig.NATIVE_MESH_HARNESS && context.packageName == "com.github.metacubex.clash.meshprototype.meta")
-        check(InstrumentationRegistry.getArguments().getString("disposableEmulator") == "true")
-        check(android.os.Build.FINGERPRINT.contains("generic") || android.os.Build.MODEL.contains("sdk"))
-        assertNull("CI must grant VPN consent only to the disposable prototype", VpnService.prepare(context))
+        NativeMeshAcceptanceGuard.verify()
+        assertNull("Android VPN consent is required", VpnService.prepare(context))
         assertFalse("Pre-existing profile means this is not a disposable test", File(context.filesDir, "imported").listFiles().orEmpty().isNotEmpty())
         folder.mkdirs()
         val token = UUID.randomUUID().toString()

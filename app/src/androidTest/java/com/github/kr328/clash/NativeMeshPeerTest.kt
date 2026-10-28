@@ -28,13 +28,11 @@ import org.junit.runner.RunWith
 class NativeMeshPeerTest {
     @Test fun realPeerPacketPath() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        check(BuildConfig.NATIVE_MESH_HARNESS && context.packageName == "com.github.metacubex.clash.meshprototype.meta")
-        check(InstrumentationRegistry.getArguments().getString("disposableEmulator") == "true")
-        check(android.os.Build.FINGERPRINT.contains("generic") || android.os.Build.MODEL.contains("sdk"))
+        val physicalDevice = NativeMeshAcceptanceGuard.verify()
         assertNull(VpnService.prepare(context))
         assertTrue(File(context.filesDir, "imported").listFiles().orEmpty().isEmpty())
         val folder = File(context.noBackupFilesDir, "native-mesh-acceptance")
-        check(File(folder, "ci-peer-guard").readText() == "disposable-ci-only")
+        check(File(folder, "ci-peer-guard").readText() == if (physicalDevice) "disposable-physical-only" else "disposable-ci-only")
         check(File(folder, "mesh.toml").isFile)
         val rejectPort = File(folder, "ci-reject-port").readText().trim().toInt()
         check(rejectPort in 1024..65535)
@@ -77,7 +75,7 @@ class NativeMeshPeerTest {
             }
             File(folder, "peer-ready").writeText("ready")
             var sequence = 0
-            withTimeout(180_000) {
+            withTimeout(if (physicalDevice) 600_000 else 180_000) {
                 while (!File(folder, "peer-result.json").exists()) {
                     check(stage() == "active") { "Native peer stopped during packet probes" }
                     val request = runCatching { JSONObject(File(folder, "mode-request.json").readText()) }.getOrNull()
