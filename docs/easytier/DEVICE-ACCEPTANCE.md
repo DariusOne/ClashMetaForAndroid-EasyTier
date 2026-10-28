@@ -84,6 +84,16 @@ Wi-Fi/cellular changes and forced interface replacements with the same strict
 continuous-source assertions. Address/route changes still require replacement;
 that Android 11 acceptance gate remains unresolved and is not skipped.
 
+Commit `5dcea88` / run `40655939624` passed six actual emulator Wi-Fi/cellular
+transitions with the same interface and mesh generation: 7,416 attempts,
+7,365 replies, 51 uncompleted requests, zero incorrect sources, and TCP/UDP
+5/5 after every transition. Forced replacement still failed (five incorrect
+TCP sources in its second cycle), so the complete job failed and no APK was
+released. Explicit reconnect/degraded dynamic behavior was not accepted by
+the user. A separate test-APK activity compares ordinary Android app-UID Java
+socket behavior against the existing shell-UID Go probe in the same replacement
+window. Both gates remain strict; this comparison is diagnostic, not a waiver.
+
 The first physical arm64 Android 17 fixture was executed on 2026-10-28 using
 prototype commit `46f358e0dd3ed3288e31186567fba2224db5ff13` and a private,
 disposable Linux peer. Ten start/stop cycles and native-child crash isolation

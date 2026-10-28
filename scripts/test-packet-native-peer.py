@@ -23,6 +23,7 @@ import uuid
 import zipfile
 from fixture_file_stage import atomic_stage_script
 from fixture_transition_watch import TransitionWatch
+from fixture_android_uid_watch import AndroidUidWatch
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "com.github.metacubex.clash.meshprototype.meta"
@@ -105,6 +106,7 @@ def main():
     peer = instrument = instrumentation = capture = None
     helpers = []
     transition_watches = []
+    android_uid_watch = None
     with tempfile.TemporaryDirectory(prefix="cmfa-native-peer-") as temp, ExitStack() as stack:
         temp = Path(temp)
         os.chmod(temp, 0o700)
@@ -325,6 +327,10 @@ def main():
                     transition_watches.append(watch)
                     watches.append((mode,echo,watch))
                 for _,_,watch in watches: watch.ready()
+                app_echoes = {mode:Echo(mode == "udp") for mode in ("tcp", "udp")}
+                for echo in app_echoes.values(): stack.callback(echo.close)
+                android_uid_watch = AndroidUidWatch(adb, sequence, app_echoes["tcp"].port, app_echoes["udp"].port)
+                android_uid_watch.ready()
                 stage("rebuild-request", str(sequence))
                 deadline = time.monotonic() + 20
                 while time.monotonic() < deadline:
@@ -342,10 +348,14 @@ def main():
                 cycle["interface_revision"] = state["interface_revision"]
                 cycle["transition"] = {}
                 covered = all(w.process.poll() is None for _,_,w in watches)
+                app_covered = android_uid_watch.running()
                 for mode,echo,watch in watches:
                     cycle["transition"][mode] = watch.finish(lambda echo=echo:list(echo.sources))
                 cycle["transition_covered_ready"] = covered
-                if not covered or not all(x["passed"] for x in cycle["transition"].values()):
+                cycle["android_app_covered_ready"] = app_covered
+                cycle["android_app_transition"] = android_uid_watch.finish({mode:lambda echo=echo:list(echo.sources) for mode,echo in app_echoes.items()})
+                if (not covered or not app_covered or not all(x["passed"] for x in cycle["transition"].values())
+                        or not all(x["passed"] for x in cycle["android_app_transition"].values())):
                     raise RuntimeError("Continuous handover packet/source assertion failed")
                 for mode in ("tcp", "udp"):
                     echo = Echo(mode == "udp")
@@ -401,6 +411,11 @@ def main():
                     except subprocess.TimeoutExpired:
                         child.kill()
                         child.wait(timeout=5)
+            if android_uid_watch is not None:
+                try: android_uid_watch.close()
+                except (OSError, subprocess.SubprocessError):
+                    result["passed"] = False
+                    result["android_uid_probe_cleanup_failed"] = True
             if capture is not None and capture.poll() is None:
                 subprocess.run(["sudo", "kill", "-TERM", "--", "-" + str(capture.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 try:

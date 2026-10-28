@@ -357,7 +357,7 @@ def main():
                     deadline=time.monotonic()+25
                     while time.monotonic()<deadline:
                         state=json.loads(read('status.json'))
-                        if state.get('stage')=='waiting-network' or state.get('interface_revision',0)>original['interface_revision']: break
+                        if state.get('stage')=='waiting-network' or state.get('network_revision',0)>original.get('network_revision',0): break
                         if state.get('stage','').startswith('ET_'): raise RuntimeError('Network interruption failed closed permanently')
                         time.sleep(.3)
                     else: raise RuntimeError('Physical network loss was not observed')
@@ -368,12 +368,13 @@ def main():
                     while time.monotonic()<deadline:
                         state=json.loads(read('status.json'))
                         if state.get('stage','').startswith('ET_'): raise RuntimeError('Network return failed permanently')
-                        if state.get('stage')=='active' and state.get('interface_revision',0)>original['interface_revision']:
+                        if state.get('stage')=='active' and state.get('physical_transport')=='wifi' and state.get('network_revision',0)>original.get('network_revision',0):
                             ready=adb('shell','ping','-c','1','-W','1','10.126.0.1',check=False,timeout=5)
                             if ready.returncode==0: break
                         time.sleep(.5)
                     else: raise RuntimeError('Mesh did not recover after Wi-Fi return')
                     if state['generation']!=original['generation']: raise RuntimeError('Network return changed mesh identity/session')
+                    if state['interface_revision']!=original['interface_revision']: raise RuntimeError('Physical handover unnecessarily replaced the VPN interface')
                     for protocol,port in [('tcp',30101),('udp',30102)]:
                         before=len(counters()[protocol])
                         probe=adb('shell','/data/local/tmp/cmfa-physical-probe',protocol+'-client','10.126.0.1',str(port),timeout=60)
@@ -382,7 +383,7 @@ def main():
                     probe=docker('ping','-c','5','-W','2','10.126.0.2',timeout=30)
                     if not re.search(r'5 (?:packets )?received',probe.stdout): raise RuntimeError('Inbound Wi-Fi recovery failed')
                     if lan: lan_probe('tcp',True); lan_probe('reject',False)
-                    cycles.append({'cycle':cycle,'observed_disconnect_stage':disconnected,'outbound_tcp':'5/5','outbound_udp':'5/5','inbound_icmp':'5/5','session_preserved':True,'cellular_mesh_transport_validated':False})
+                    cycles.append({'cycle':cycle,'observed_disconnect_stage':disconnected,'outbound_tcp':'5/5','outbound_udp':'5/5','inbound_icmp':'5/5','session_preserved':True,'interface_preserved':True,'cellular_mesh_transport_validated':False})
                     result['checks']['wifi_return_cycles']=cycles
                     print('Wi-Fi interruption/return '+str(cycle)+': TCP/UDP/ICMP 5/5; same mesh session',flush=True)
             if proxy:

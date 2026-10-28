@@ -1,0 +1,8 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application>
+        <!-- Test APK only: independent app UID, never the excluded VPN owner. -->
+        <activity android:name="com.github.kr328.clash.HandoverProbeActivity"
+            android:exported="true" android:excludeFromRecents="true" />
+    </application>
+</manifest>
