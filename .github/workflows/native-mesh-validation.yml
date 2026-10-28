@@ -28,7 +28,7 @@ jobs:
           native = True
           if os.environ['EVENT_NAME'] == 'push' and re.fullmatch(r'[0-9a-f]{40}', base) and base != '0' * 40:
               paths = subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines()
-              native = any(p.startswith(('native/','core/src/main/','service/src/main/','app/src/androidTest/','scripts/fixtures/')) or p in ('.gitmodules','scripts/build-easytier-android.py','scripts/prepare-mihomo.py','scripts/test_prepare_mihomo.py','scripts/test-packet-prototype-emulator.py','scripts/test-packet-native-peer.py','build.gradle.kts','core/build.gradle.kts','app/src/main/java/com/github/kr328/clash/MainApplication.kt','.github/workflows/native-mesh-validation.yml') for p in paths)
+              native = any(p.startswith(('native/','core/src/main/','service/src/main/','app/src/androidTest/','scripts/fixtures/','scripts/fixture_')) or p in ('.gitmodules','scripts/build-easytier-android.py','scripts/prepare-mihomo.py','scripts/test_prepare_mihomo.py','scripts/test-packet-prototype-emulator.py','scripts/test-packet-native-peer.py','build.gradle.kts','core/build.gradle.kts','app/src/main/java/com/github/kr328/clash/MainApplication.kt','.github/workflows/native-mesh-validation.yml') for p in paths)
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('native=' + str(native).lower() + '\n')
           PY
