@@ -37,7 +37,10 @@ class AndroidUidWatch:
         while time.monotonic() < deadline:
             if all((self.read(mode) or {}).get('ready') for mode in ('tcp','udp')): return
             time.sleep(.05)
-        raise RuntimeError('Android app UID probe baseline failed')
+        states = [self.read(mode) or {} for mode in ('tcp','udp')]
+        codes = [state.get('failure_code') for state in states]
+        code = next((x for x in codes if x in ('INTERRUPTED','FIXTURE_RUNTIME_FAILED')), 'NOT_READY')
+        raise RuntimeError('Android app UID probe baseline failed: '+code)
 
     def running(self):
         states = [self.read(mode) or {} for mode in ('tcp','udp')]
@@ -53,7 +56,8 @@ class AndroidUidWatch:
         for mode,result in results.items():
             peer = sources[mode]()
             result.update(peer_observed=len(peer), peer_wrong_source=sum(ip != '10.126.0.2' for ip in peer))
-            result['passed'] = result['received'] > 0 and result['wrong_source'] == 0 and result['invalid_payload'] == 0 and result['peer_wrong_source'] == 0
+            result['passed'] = (result['received'] > 0 and result['wrong_source'] == 0 and
+                result['invalid_payload'] == 0 and result['peer_wrong_source'] == 0 and not result.get('failure_code'))
         return results
 
     def close(self):
