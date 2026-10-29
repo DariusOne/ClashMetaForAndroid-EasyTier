@@ -1,5 +1,9 @@
 # Native EasyTier integration — implementation gate
 
+An interim [Android 17 arm64 preview](ANDROID17-PREVIEW.md) is now deliverable
+at the user's request. It is the unchanged, physically tested packet-path APK,
+with an API/ABI-checked installer. The complete application gate remains open.
+
 This branch is an **unfinished packet-path prototype**, not a completed combined
 VPN. Normal builds retain the original service behavior. An explicit development
 build and private opt-in marker connect a raw-packet acceptance harness to the

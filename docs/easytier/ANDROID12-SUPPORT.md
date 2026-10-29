@@ -1,5 +1,10 @@
 # Android 12+ native integration support
 
+Historical investigation: on 2026-10-29 the user narrowed interim delivery to
+Android 17 / API 37 arm64. See [the current preview scope](ANDROID17-PREVIEW.md).
+The failures below remain valid; API 31 is no longer a delivery target. The
+unchanged physically tested APK retains this older manifest minimum.
+
 The native integrated prototype requires Android 12 / API 31 from commit
 `6e6f6681fcf8861524033984afb44e6f80399221`. This is a build/install boundary,
 not a claim that every Android 12+ device passes packet-path acceptance. The

@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "channel": "android17-physical-preview",
+  "supported_api": 37,
+  "supported_abi": "arm64-v8a",
+  "package": "com.github.metacubex.clash.meshprototype.meta",
+  "apk": "cmfa-easytier-android17-preview.apk",
+  "apk_sha256": "f6560523b63b9b9a437cd7b20be643dea47be7da538c6c7e86da254e28cf404a",
+  "apk_source_commit": "39ef3fe5c8381dc2c25e0422cca9712866060f4e",
+  "apk_workflow_run": 40833169373,
+  "manifest_min_sdk": 31,
+  "manifest_target_sdk": 35,
+  "physical_fixture_commit": "ac2d52344005ab891098f286ec8940f28f1673d9",
+  "physical_result_sha256": "7a83b394cfcc5ae3f4725b46c9fd54b04dacd43be0133b019ea36be84880272f",
+  "validation": {
+    "interface_replacements": 3,
+    "ordinary_app_attempts": 4159,
+    "ordinary_app_replies": 4140,
+    "peer_wrong_source": 0,
+    "alternate_path_observations": 0,
+    "before_after_positive_controls": true,
+    "bidirectional_tcp_udp_icmp": "5/5 each",
+    "bidirectional_4096_byte_icmp": "5/5 each",
+    "scope": "One API 37 arm64 phone; finite same-virtual-subnet IPv4 tests"
+  },
+  "complete_integration": false,
+  "production_ui_complete": false,
+  "unsupported": ["Android API below 37", "Other Android API/ABI combinations without separate acceptance"],
+  "open_items": [
+    "Cross-virtual-subnet failure remains unresolved",
+    "Production profile and mode UI",
+    "Post-resolution DNS/Fake-IP and HTTP/SOCKS integration",
+    "IPv6, native UDP/STUN/QUIC and cellular transport acceptance",
+    "Dynamic DHCP/published-route growth and long-duration acceptance"
+  ]
+}

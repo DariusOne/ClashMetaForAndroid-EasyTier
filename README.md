@@ -1,10 +1,11 @@
 ## Clash Meta for Android + native EasyTier (work in progress)
 
-**开发中：当前仅完成原生组网的数据通道基础组件，尚未交付集成 APK。**
+**Android 17 预览版：先交付已在真机测试的原生 IPv4 数据通道 APK，完整整合仍在开发。**
 只让 EasyTier 管理的地址进入组网，其余流量保留 CMFA 原配置语义。
-原生整合版最低要求 **Android 12（API 31）**，支持 `arm64-v8a` 和 `x86_64`。
-最低版本限制已加入构建及运行检查；动态接口切换仍有未通过的验收项，
-详见 [Android 12+ 验证结果](docs/easytier/ANDROID12-SUPPORT.md)。
+本次交付范围收敛为 **Android 17（API 37）、arm64 真机**；安装工具拒绝其他平台。
+为了交付已实测的同一 APK，其原有 manifest/target SDK 保持原样，不能据此宣称旧系统受支持。
+安装、分开导入 YAML/TOML、功能限制及回退见 [Android 17 交付说明](docs/easytier/ANDROID17-PREVIEW.md)。
+Android 12/15 的历史接口交接失败证据仍保留在 [历史验证结果](docs/easytier/ANDROID12-SUPPORT.md)。
 实现进度、测试边界和待完成验收见 [Native integration status](docs/easytier/IMPLEMENTATION.md)。
 
 ## Upstream Clash Meta for Android

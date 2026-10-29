@@ -1,5 +1,10 @@
 # Packet-path prototype (not the finished application)
 
+For the 2026-10-29 interim delivery use [Android 17 preview instructions](ANDROID17-PREVIEW.md).
+They intentionally select the exact physically tested APK, constrain the installer
+to API 37 arm64, and retain the limitations below. Older manifest/CI support
+described here is diagnostic history, not the current delivery support range.
+
 This harness exists to make the native packet path testable before UI/generator
 rollout. The integrated APK requires **Android 12 / API 31 or later**, enforced
 in its manifest and at native-harness entry. The independent upstream-like

@@ -1,5 +1,10 @@
 # Device acceptance gate (not yet passed)
 
+Current delivery decision (2026-10-29): offer the exact tested APK as an
+[Android 17 arm64 preview](ANDROID17-PREVIEW.md). This narrows platform scope;
+it does not mark the unfinished rows below complete. Older-API failures remain
+historical evidence, not Android 17 acceptance. Normal CMFA remains unchanged.
+
 As requested on 2026-10-28, native integration now targets **Android 12+ (API 31)**.
 The integrated APK's minimum API and runtime guard reject older versions. The
 independent normal CMFA build is unchanged. Android 11 results below remain
