@@ -14,6 +14,7 @@ import android.util.AtomicFile;
 import android.util.Log;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileInputStream;
 import java.io.FileDescriptor;
 import java.io.IOException;
 import java.net.InetAddress;
@@ -35,6 +36,59 @@ import org.json.JSONObject;
  */
 public final class HandoverProbeActivity extends Activity {
     private File directory;
+    private InetAddress destination;
+    private String expectedSource = "10.126.0.2";
+
+    private static InetAddress privateIpv4(String value) throws IOException {
+        if (!value.matches("[0-9]{1,3}(\\.[0-9]{1,3}){3}")) throw new IOException("ADDRESS");
+        String[] parts = value.split("\\.");
+        byte[] bytes = new byte[4];
+        for (int i = 0; i < 4; i++) {
+            int n = Integer.parseInt(parts[i]);
+            if (n > 255 || !Integer.toString(n).equals(parts[i])) throw new IOException("ADDRESS");
+            bytes[i] = (byte)n;
+        }
+        InetAddress address = InetAddress.getByAddress(bytes);
+        if (!address.isSiteLocalAddress()) throw new IOException("PRIVATE_ADDRESS_REQUIRED");
+        return address;
+    }
+
+    /** A separate, non-VPN diagnostic APK may run on an explicitly authorized
+     * phone. Its short-lived consent is staged through adb into its own private
+     * directory; exported intent extras cannot choose a host or VPN owner. */
+    private String verifyFixture() throws IOException, JSONException {
+        boolean emulator = "ranchu".equals(Build.HARDWARE) || "goldfish".equals(Build.HARDWARE);
+        if ("com.github.metacubex.clash.meshprototype.meta.test".equals(getPackageName()) &&
+                emulator && "disposable-ci-only".equals(getIntent().getStringExtra("guard"))) {
+            destination = privateIpv4("10.126.0.1");
+            return "com.github.metacubex.clash.meshprototype.meta";
+        }
+        if (!"com.github.metacubex.clash.socketprobe".equals(getPackageName()) || emulator ||
+                Build.VERSION.SDK_INT < 31 ||
+                !"authorized-physical-only".equals(getIntent().getStringExtra("guard")))
+            throw new IOException("FIXTURE_GUARD_FAILED");
+        File marker = new File(getNoBackupFilesDir(), "physical-probe-consent.json");
+        if (marker.length() < 1 || marker.length() > 2048) throw new IOException("CONSENT");
+        byte[] content = new byte[(int)marker.length()];
+        try (FileInputStream input = new FileInputStream(marker)) {
+            int offset = 0, count;
+            while (offset < content.length && (count = input.read(content, offset, content.length-offset)) > 0)
+                offset += count;
+            if (offset != content.length || input.read() != -1) throw new IOException("CONSENT");
+        }
+        JSONObject consent = new JSONObject(new String(content, StandardCharsets.UTF_8));
+        String token = consent.getString("token");
+        long remaining = consent.getLong("expires_ms") - System.currentTimeMillis();
+        if (!token.matches("[0-9a-f-]{36}") || !token.equals(getIntent().getStringExtra("consent")) ||
+                remaining <= 0 || remaining > 900000) throw new IOException("CONSENT");
+        String owner = consent.getString("owner_package");
+        if (!Arrays.asList("com.github.metacubex.clash.meshprototype.meta",
+                "com.github.metacubex.clash.meta", "com.kkrainbow.easytier").contains(owner))
+            throw new IOException("OWNER");
+        destination = privateIpv4(consent.getString("destination"));
+        expectedSource = privateIpv4(consent.getString("expected_source")).getHostAddress();
+        return owner;
+    }
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -45,15 +99,12 @@ public final class HandoverProbeActivity extends Activity {
         final int udp4 = getIntent().getIntExtra("udp4Port", 0);
         final int owner;
         try {
-            owner = getPackageManager().getApplicationInfo(
-                    "com.github.metacubex.clash.meshprototype.meta", 0).uid;
-        } catch (android.content.pm.PackageManager.NameNotFoundException e) {
+            owner = getPackageManager().getApplicationInfo(verifyFixture(), 0).uid;
+        } catch (android.content.pm.PackageManager.NameNotFoundException | IOException | JSONException e) {
+            Log.w("HandoverProbe", "FIXTURE_GUARD_FAILED");
             finish(); return;
         }
         if ((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) == 0 ||
-                !"com.github.metacubex.clash.meshprototype.meta.test".equals(getPackageName()) ||
-                !("ranchu".equals(Build.HARDWARE) || "goldfish".equals(Build.HARDWARE)) ||
-                !"disposable-ci-only".equals(getIntent().getStringExtra("guard")) ||
                 Process.myUid() < 10000 || Process.myUid() == owner ||
                 sequence < 1 || sequence > 100 || tcp < 1024 || tcp > 65535 ||
                 udp < 1024 || udp > 65535 || tcp4 < 1024 || tcp4 > 65535 ||
@@ -150,7 +201,7 @@ public final class HandoverProbeActivity extends Activity {
         selector.selectedKeys().clear();
     }
 
-    private static final class Counts {
+    private final class Counts {
         int attempts, received, blocked, wrong, invalid, clash, other;
         boolean ready;
         String failure = "";
@@ -169,7 +220,7 @@ public final class HandoverProbeActivity extends Activity {
 
         void source(InetSocketAddress local) {
             String address = local.getAddress().getHostAddress();
-            if (!"10.126.0.2".equals(address)) {
+            if (!expectedSource.equals(address)) {
                 wrong++;
                 if ("172.19.0.1".equals(address)) clash++; else other++;
             }
@@ -180,8 +231,7 @@ public final class HandoverProbeActivity extends Activity {
         Counts c = new Counts();
         long finishAt = c.started + 8000;
         try {
-            InetSocketAddress address = new InetSocketAddress(
-                    InetAddress.getByAddress(new byte[] {10, 126, 0, 1}), port);
+            InetSocketAddress address = new InetSocketAddress(destination, port);
             save(mode, c.result(sequence, owner, false));
             while (SystemClock.elapsedRealtime() < finishAt && c.attempts < 800) {
                 c.attempts++;

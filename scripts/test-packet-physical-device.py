@@ -20,6 +20,7 @@ import tomllib
 import uuid
 from fixture_file_stage import atomic_stage_script
 from fixture_transition_watch import TransitionWatch
+from fixture_android_uid_watch import AndroidUidWatch, MODES as APP_MODES, PHYSICAL_PACKAGE
 
 PACKAGE = 'com.github.metacubex.clash.meshprototype.meta'
 FOLDER = 'no_backup/native-mesh-acceptance/'
@@ -42,9 +43,12 @@ def main():
     parser.add_argument('--wifi-return-cycles', type=int, choices=range(0,4), default=0)
     parser.add_argument('--proxy-fixture', type=Path)
     parser.add_argument('--transition-probe', type=Path)
+    parser.add_argument('--android-app-probe', action='store_true', help='Use the separately installed, consent-gated ordinary-app diagnostic')
     args = parser.parse_args()
     if args.transition_probe and (args.phase != 'peer' or not args.rebuild_cycles):
         parser.error('Transition probe requires peer phase and interface rebuild cycles')
+    if args.android_app_probe and (args.phase != 'peer' or not args.rebuild_cycles):
+        parser.error('Ordinary-app probe requires peer phase and interface rebuild cycles')
     base = [args.adb, '-s', args.serial]
     root = args.test_root.resolve(strict=True)
     lan = None
@@ -116,11 +120,22 @@ def main():
     instrumentation = None
     helpers = []
     transition_watches = []
+    app_watch = None
+    app_consent_staged = False
     reverse_created = False
     discovery_staged = False
     restore_wifi = False
     log = (root / (args.phase + '-instrumentation.txt')).open('w', encoding='utf-8')
     try:
+        if args.android_app_probe:
+            if not adb('shell','pm','path',PHYSICAL_PACKAGE).stdout.strip():
+                raise RuntimeError('Separate ordinary-app diagnostic is not installed')
+            consent = json.dumps({'token':token, 'expires_ms':int(time.time()*1000)+600000,
+                'owner_package':PACKAGE, 'destination':'10.126.0.1', 'expected_source':'10.126.0.2'}).encode()
+            app_consent_staged = True
+            subprocess.run(base+['shell','-T','run-as',PHYSICAL_PACKAGE,'sh','-c',
+                shlex.quote('umask 077; mkdir -p no_backup; cat > no_backup/physical-probe-consent.pending; mv no_backup/physical-probe-consent.pending no_backup/physical-probe-consent.json')],
+                input=consent, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=10)
         if args.phase == 'peer':
             if not args.container or not re.fullmatch(r'cmfa-native-[a-z0-9-]+', args.container) or not args.probe or not args.host_port:
                 raise RuntimeError('Explicit disposable peer and probe required')
@@ -305,6 +320,14 @@ def main():
                 result['generic_ipv4_discovery_validated']=True
             rebuilds=[]
             result['checks']['interface_rebuilds']=rebuilds
+            if args.android_app_probe:
+                app_before = {mode:len(counters()['app_'+mode]) for mode in APP_MODES}
+                app_watch = AndroidUidWatch(base, 90, dict(zip(APP_MODES,(30111,30112,30113,30114))), physical_consent=token)
+                app_watch.ready()
+                result['checks']['android_app_steady'] = app_watch.finish({mode:lambda mode=mode:counters()['app_'+mode][app_before[mode]:] for mode in APP_MODES})
+                app_watch.close(); app_watch = None
+                if not all(x['passed'] for x in result['checks']['android_app_steady'].values()):
+                    raise RuntimeError('Ordinary-app unchanged-interface baseline failed')
             for sequence in range(1,args.rebuild_cycles+1):
                 cycle={'cycle':sequence,'passed':False}
                 rebuilds.append(cycle)
@@ -317,6 +340,10 @@ def main():
                         transition_watches.append(watch)
                         watches.append((protocol,before,watch))
                     for _,_,watch in watches: watch.ready()
+                if args.android_app_probe:
+                    app_before = {mode:len(counters()['app_'+mode]) for mode in APP_MODES}
+                    app_watch = AndroidUidWatch(base, sequence, dict(zip(APP_MODES,(30111,30112,30113,30114))), physical_consent=token)
+                    app_watch.ready()
                 stage('rebuild-request',str(sequence).encode())
                 deadline=time.monotonic()+20
                 while time.monotonic()<deadline:
@@ -327,14 +354,20 @@ def main():
                 else: raise RuntimeError('Interface rebuild timed out')
                 if state['generation']!=original['generation'] or state['interface_revision']<=original['interface_revision']:
                     raise RuntimeError('Rebuild replaced session or did not replace interface')
+                covered=all(w.process.poll() is None for _,_,w in watches)
+                if app_watch:
+                    cycle['android_app_covered_ready'] = app_watch.running()
+                    cycle['android_app_transition'] = app_watch.finish({mode:lambda mode=mode:counters()['app_'+mode][app_before[mode]:] for mode in APP_MODES})
+                    app_watch.close(); app_watch = None
                 if watches:
                     cycle['transition']={}
-                    covered=all(w.process.poll() is None for _,_,w in watches)
                     for protocol,before,watch in watches:
                         cycle['transition'][protocol]=watch.finish(lambda protocol=protocol,before=before:counters()[protocol][before:])
                     cycle['transition_covered_ready']=covered
                     if not covered or not all(x['passed'] for x in cycle['transition'].values()):
                         raise RuntimeError('Continuous handover packet/source assertion failed')
+                if args.android_app_probe and (not cycle['android_app_covered_ready'] or not all(x['passed'] for x in cycle['android_app_transition'].values())):
+                    raise RuntimeError('Ordinary-app handover packet/source assertion failed')
                 for protocol,port in [('tcp',30101),('udp',30102)]:
                     before=len(counters()[protocol])
                     probe=adb('shell','/data/local/tmp/cmfa-physical-probe',protocol+'-client','10.126.0.1',str(port),timeout=60)
@@ -435,6 +468,7 @@ def main():
         if type(error) is RuntimeError: result['failure']=str(error)
         raise
     finally:
+        if app_watch is not None: app_watch.close()
         for watch in transition_watches: watch.close()
         if not result['passed']:
             try:
@@ -448,6 +482,11 @@ def main():
             try: stage('peer-result.json', b'{"passed":false}'); instrumentation.wait(timeout=20)
             except Exception: pass
         cleanup_errors=[]
+        if app_consent_staged:
+            try:
+                adb('shell','am','force-stop',PHYSICAL_PACKAGE,timeout=10)
+                adb('shell','run-as',PHYSICAL_PACKAGE,'rm','-f','no_backup/physical-probe-consent.json','no_backup/physical-probe-consent.pending',timeout=10)
+            except Exception: cleanup_errors.append('app_probe_cleanup_unconfirmed')
         if restore_wifi:
             try:
                 adb('shell','svc','wifi','enable',timeout=15)
