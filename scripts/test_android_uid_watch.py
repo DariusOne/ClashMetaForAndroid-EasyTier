@@ -52,6 +52,12 @@ class AppUidWatchTests(unittest.TestCase):
             result=watch.finish({mode:lambda:['172.19.0.1'] for mode in MODES})
         self.assertTrue(all(v['passed'] for v in result.values()))
 
+    def test_client_replies_without_peer_evidence_cannot_pass(self):
+        watch=self.watch()
+        with patch.object(watch,'read',side_effect=lambda mode:self.result()):
+            result=watch.finish({mode:lambda:[] for mode in MODES})
+        self.assertTrue(all(not v['passed'] for v in result.values()))
+
     def test_finished_window_cannot_count_as_ready(self):
         watch=self.watch()
         with patch.object(watch,'read',return_value=self.result()):

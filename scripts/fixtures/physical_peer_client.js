@@ -3,6 +3,9 @@ const net = require('node:net');
 const dgram = require('node:dgram');
 const mode = process.argv[2];
 const port = Number(process.argv[3]);
+const destination = process.argv[4] || '10.126.0.2';
+const parts = destination.split('.').map(Number);
+if (!net.isIPv4(destination) || !(parts[0] === 10 || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || (parts[0] === 192 && parts[1] === 168))) process.exit(2);
 if (!['tcp', 'udp'].includes(mode) || !Number.isInteger(port) || port < 1024 || port > 65535) process.exit(2);
 async function once(i) {
   const payload = Buffer.from(`physical-native-peer-${i}\n`);
@@ -25,10 +28,10 @@ async function once(i) {
     }
     if (mode === 'udp') {
       socket.on('message', data);
-      socket.send(payload, port, '10.126.0.2');
+      socket.send(payload, port, destination);
     } else {
       socket.on('data', data);
-      socket.connect(port, '10.126.0.2', () => socket.write(payload));
+      socket.connect(port, destination, () => socket.write(payload));
     }
   });
 }

@@ -75,6 +75,8 @@ jobs:
         run: python3 scripts/test_fixture_file_stage.py
       - name: Ordinary-app evidence and physical diagnostic isolation regression
         run: python3 scripts/test_android_uid_watch.py
+      - name: Bounded alternate-path observer regression
+        run: python3 scripts/test_physical_underlay_echo.py
       - name: Continuous handover probe bounds and wrong-source regression
         run: go test -count=1 scripts/fixtures/transition_probe.go scripts/fixtures/transition_probe_test.go
       - name: NDK counterpart host deadline and wrong-source regression

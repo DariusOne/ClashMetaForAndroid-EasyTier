@@ -43,14 +43,39 @@ def main():
     parser.add_argument('--wifi-return-cycles', type=int, choices=range(0,4), default=0)
     parser.add_argument('--proxy-fixture', type=Path)
     parser.add_argument('--transition-probe', type=Path)
+    parser.add_argument('--mesh-peer-address', default='10.126.0.1')
+    parser.add_argument('--mesh-phone-address', default='10.126.0.2')
+    parser.add_argument('--underlay-fixture', type=Path)
     parser.add_argument('--android-app-probe', action='store_true', help='Use the separately installed, consent-gated ordinary-app diagnostic')
     args = parser.parse_args()
     if args.transition_probe and (args.phase != 'peer' or not args.rebuild_cycles):
         parser.error('Transition probe requires peer phase and interface rebuild cycles')
     if args.android_app_probe and (args.phase != 'peer' or not args.rebuild_cycles):
         parser.error('Ordinary-app probe requires peer phase and interface rebuild cycles')
+    peer_address = str(ipaddress.IPv4Address(args.mesh_peer_address))
+    phone_address = str(ipaddress.IPv4Address(args.mesh_phone_address))
+    if not any(ipaddress.IPv4Address(peer_address) in ipaddress.ip_network(cidr) for cidr in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16')):
+        parser.error('Private controlled peer address required')
+    if not any(ipaddress.IPv4Address(phone_address) in ipaddress.ip_network(cidr) for cidr in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16')) or phone_address == peer_address:
+        parser.error('Distinct private mesh phone address required')
+    if args.transition_probe and (peer_address != '10.126.0.1' or phone_address != '10.126.0.2'):
+        parser.error('The legacy shell probe has a fixed target; use the ordinary-app probe here')
+    if args.underlay_fixture and not args.android_app_probe:
+        parser.error('Underlay control requires the ordinary-app probe')
     base = [args.adb, '-s', args.serial]
     root = args.test_root.resolve(strict=True)
+    if args.phase == 'peer':
+        profile_address = ipaddress.ip_interface(tomllib.loads((root/'phone.toml').read_text(encoding='utf-8'))['ipv4'])
+        if str(profile_address.ip) != phone_address:
+            parser.error('Disposable profile and expected phone address differ')
+        broadcast_address = str(profile_address.network.broadcast_address)
+    underlay = None
+    if args.underlay_fixture:
+        args.underlay_fixture = args.underlay_fixture.resolve(strict=True)
+        underlay = json.loads((args.underlay_fixture/'underlay-ready.json').read_text(encoding='utf-8'))
+        if underlay['host'] != peer_address or underlay['ports'] != dict(zip(APP_MODES,(30111,30112,30113,30114))):
+            parser.error('Underlay and mesh must test exactly the same destination and ports')
+        ipaddress.IPv4Address(underlay['phone'])
     lan = None
     native_lan = None
     proxy = None
@@ -126,16 +151,38 @@ def main():
     discovery_staged = False
     restore_wifi = False
     log = (root / (args.phase + '-instrumentation.txt')).open('w', encoding='utf-8')
+    def stage_app_consent(expected_source):
+        nonlocal app_consent_staged
+        consent = json.dumps({'token':token, 'expires_ms':int(time.time()*1000)+600000,
+            'owner_package':PACKAGE, 'destination':peer_address, 'expected_source':expected_source}).encode()
+        app_consent_staged = True
+        subprocess.run(base+['shell','-T','run-as',PHYSICAL_PACKAGE,'sh','-c',
+            shlex.quote('umask 077; mkdir -p no_backup; cat > no_backup/physical-probe-consent.pending; mv no_backup/physical-probe-consent.pending no_backup/physical-probe-consent.json')],
+            input=consent, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=10)
+    def underlay_counts():
+        if (args.underlay_fixture/'underlay-stopped.json').exists():
+            raise RuntimeError('Underlay observation fixture expired')
+        value=json.loads((args.underlay_fixture/'underlay-counts.json').read_text(encoding='utf-8'))
+        if set(value)!=set(APP_MODES): raise RuntimeError('Underlay counter schema mismatch')
+        return value
+    def positive_control(sequence):
+        nonlocal app_watch
+        stage_app_consent(underlay['phone'])
+        before={mode:len(values) for mode,values in underlay_counts().items()}
+        app_watch=AndroidUidWatch(base,sequence,underlay['ports'],physical_consent=token,expected_source=underlay['phone'])
+        app_watch.ready()
+        values=app_watch.finish({mode:lambda mode=mode:underlay_counts()[mode][before[mode]:] for mode in APP_MODES})
+        app_watch.close(); app_watch=None
+        if not all(v['passed'] and v['peer_observed']>0 for v in values.values()):
+            raise RuntimeError('Alternate physical path positive control failed')
+        return values
     try:
         if args.android_app_probe:
             if not adb('shell','pm','path',PHYSICAL_PACKAGE).stdout.strip():
                 raise RuntimeError('Separate ordinary-app diagnostic is not installed')
-            consent = json.dumps({'token':token, 'expires_ms':int(time.time()*1000)+600000,
-                'owner_package':PACKAGE, 'destination':'10.126.0.1', 'expected_source':'10.126.0.2'}).encode()
-            app_consent_staged = True
-            subprocess.run(base+['shell','-T','run-as',PHYSICAL_PACKAGE,'sh','-c',
-                shlex.quote('umask 077; mkdir -p no_backup; cat > no_backup/physical-probe-consent.pending; mv no_backup/physical-probe-consent.pending no_backup/physical-probe-consent.json')],
-                input=consent, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=10)
+            if underlay:
+                result['checks']['underlay_before']=positive_control(91)
+            stage_app_consent(phone_address)
         if args.phase == 'peer':
             if not args.container or not re.fullmatch(r'cmfa-native-[a-z0-9-]+', args.container) or not args.probe or not args.host_port:
                 raise RuntimeError('Explicit disposable peer and probe required')
@@ -200,9 +247,9 @@ def main():
                 return json.loads(docker('cat','/tmp/packet-counts.json').stdout)
             for protocol, port in [('tcp',30101),('udp',30102)]:
                 before=len(counters()[protocol])
-                out=adb('shell','/data/local/tmp/cmfa-physical-probe',protocol+'-client','10.126.0.1',str(port),timeout=65).stdout
+                out=adb('shell','/data/local/tmp/cmfa-physical-probe',protocol+'-client',peer_address,str(port),timeout=65).stdout
                 sources=counters()[protocol][before:]
-                if 'PASS 5/5' not in out or sources != ['10.126.0.2']*5:
+                if 'PASS 5/5' not in out or sources != [phone_address]*5:
                     raise RuntimeError('Physical outbound packet/source assertion failed: '+protocol)
                 result['checks']['outbound_'+protocol]={'passed':5,'expected':5,'virtual_source_verified':True}
                 print(protocol+' phone -> peer: 5/5, virtual source verified',flush=True)
@@ -214,7 +261,7 @@ def main():
                     for line in stream: events.put(line.strip())
                 thread=threading.Thread(target=consume,args=(helper.stdout,),daemon=True); thread.start()
                 if events.get(timeout=10)!='READY': raise RuntimeError('Physical listener failed')
-                out=docker('node','/fixtures/physical_peer_client.js',protocol,str(port),timeout=60).stdout
+                out=docker('node','/fixtures/physical_peer_client.js',protocol,str(port),phone_address,timeout=60).stdout
                 helper.wait(timeout=10); thread.join(timeout=2)
                 lines=[]
                 while not events.empty(): lines.append(events.get_nowait())
@@ -222,7 +269,7 @@ def main():
                     raise RuntimeError('Physical inbound packet assertion failed: '+protocol)
                 result['checks']['inbound_'+protocol]={'passed':5,'expected':5}
                 print(protocol+' peer -> phone: 5/5',flush=True)
-            for direction, command in [('outbound',lambda:adb('shell','ping','-c','5','-W','2','10.126.0.1',timeout=30)),('inbound',lambda:docker('ping','-c','5','-W','2','10.126.0.2',timeout=30))]:
+            for direction, command in [('outbound',lambda:adb('shell','ping','-c','5','-W','2',peer_address,timeout=30)),('inbound',lambda:docker('ping','-c','5','-W','2',phone_address,timeout=30))]:
                 output=command().stdout
                 if not re.search(r'5 (?:packets )?received',output): raise RuntimeError('Physical ICMP assertion failed: '+direction)
                 result['checks'][direction+'_icmp']={'passed':5,'expected':5}
@@ -230,8 +277,8 @@ def main():
             # 4096 bytes exceeds both virtual interface MTUs. Check intact
             # ICMP payload delivery in both directions, not merely tiny echo.
             for direction, command in [
-                ('outbound',lambda:adb('shell','ping','-c','5','-W','2','-s','4096','10.126.0.1',timeout=30)),
-                ('inbound',lambda:docker('ping','-c','5','-W','2','-s','4096','10.126.0.2',timeout=30)),
+                ('outbound',lambda:adb('shell','ping','-c','5','-W','2','-s','4096',peer_address,timeout=30)),
+                ('inbound',lambda:docker('ping','-c','5','-W','2','-s','4096',phone_address,timeout=30)),
             ]:
                 output=command().stdout
                 if not re.search(r'5 (?:packets )?received',output):
@@ -266,8 +313,8 @@ def main():
                         time.sleep(.2)
                     else: raise RuntimeError('Physical CMFA mode did not apply: '+mode)
                     before=len(counters()['tcp'])
-                    probe=adb('shell','/data/local/tmp/cmfa-physical-probe','tcp-client','10.126.0.1','30101',timeout=60,check=False)
-                    if probe.returncode or 'PASS 5/5' not in probe.stdout or counters()['tcp'][before:] != ['10.126.0.2']*5:
+                    probe=adb('shell','/data/local/tmp/cmfa-physical-probe','tcp-client',peer_address,'30101',timeout=60,check=False)
+                    if probe.returncode or 'PASS 5/5' not in probe.stdout or counters()['tcp'][before:] != [phone_address]*5:
                         result['checks']['failed_mode_probe']={
                             'mode':mode,'exit_code':probe.returncode,
                             'probe_codes':re.findall(r'\b[A-Z][A-Z_]{3,}\b',probe.stderr),
@@ -275,7 +322,7 @@ def main():
                         }
                         diagnostics = {
                             'status':read('status.json'),
-                            'route_to_test_peer':adb('shell','ip','-4','route','get','10.126.0.1',check=False).stdout,
+                            'route_to_test_peer':adb('shell','ip','-4','route','get',peer_address,check=False).stdout,
                             'underlay_test_sockets':docker('ss','-tnp',check=False).stdout,
                         }
                         vpn=adb('shell','dumpsys','vpn_management',check=False).stdout
@@ -293,12 +340,12 @@ def main():
                 result['checks']['native_lan_tcp']=transport_counts
             if discovery_staged:
                 discovery={}
-                for destination in ('10.126.0.255','255.255.255.255','224.0.0.251','239.255.255.250'):
+                for destination in (broadcast_address,'255.255.255.255','224.0.0.251','239.255.255.250'):
                     for direction in ('outbound','inbound'):
                         phone=base+['shell','/data/local/tmp/cmfa-discovery-probe']
                         peer=['docker','exec',args.container,'/tmp/cmfa-discovery-probe']
-                        server=(peer+['server','10.126.0.1',destination,'27443'] if direction=='outbound' else phone+['server','10.126.0.2',destination,'27443'])
-                        client=(phone+['client','10.126.0.2',destination,'27443'] if direction=='outbound' else peer+['client','10.126.0.1',destination,'27443'])
+                        server=(peer+['server',peer_address,destination,'27443'] if direction=='outbound' else phone+['server',phone_address,destination,'27443'])
+                        client=(phone+['client',phone_address,destination,'27443'] if direction=='outbound' else peer+['client',peer_address,destination,'27443'])
                         helper=subprocess.Popen(server,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,encoding='utf-8',errors='replace')
                         helpers.append(helper)
                         events=queue.Queue()
@@ -322,12 +369,17 @@ def main():
             result['checks']['interface_rebuilds']=rebuilds
             if args.android_app_probe:
                 app_before = {mode:len(counters()['app_'+mode]) for mode in APP_MODES}
-                app_watch = AndroidUidWatch(base, 90, dict(zip(APP_MODES,(30111,30112,30113,30114))), physical_consent=token)
+                if underlay: underlay_before={mode:len(v) for mode,v in underlay_counts().items()}
+                app_watch = AndroidUidWatch(base, 90, dict(zip(APP_MODES,(30111,30112,30113,30114))), physical_consent=token,expected_source=phone_address)
                 app_watch.ready()
                 result['checks']['android_app_steady'] = app_watch.finish({mode:lambda mode=mode:counters()['app_'+mode][app_before[mode]:] for mode in APP_MODES})
                 app_watch.close(); app_watch = None
                 if not all(x['passed'] for x in result['checks']['android_app_steady'].values()):
                     raise RuntimeError('Ordinary-app unchanged-interface baseline failed')
+                if underlay:
+                    observed={mode:len(v)-underlay_before[mode] for mode,v in underlay_counts().items()}
+                    result['checks']['underlay_steady']=observed
+                    if any(observed.values()): raise RuntimeError('Unchanged mesh escaped to the physical listener')
             for sequence in range(1,args.rebuild_cycles+1):
                 cycle={'cycle':sequence,'passed':False}
                 rebuilds.append(cycle)
@@ -342,7 +394,8 @@ def main():
                     for _,_,watch in watches: watch.ready()
                 if args.android_app_probe:
                     app_before = {mode:len(counters()['app_'+mode]) for mode in APP_MODES}
-                    app_watch = AndroidUidWatch(base, sequence, dict(zip(APP_MODES,(30111,30112,30113,30114))), physical_consent=token)
+                    if underlay: underlay_before={mode:len(v) for mode,v in underlay_counts().items()}
+                    app_watch = AndroidUidWatch(base, sequence, dict(zip(APP_MODES,(30111,30112,30113,30114))), physical_consent=token,expected_source=phone_address)
                     app_watch.ready()
                 stage('rebuild-request',str(sequence).encode())
                 deadline=time.monotonic()+20
@@ -359,6 +412,8 @@ def main():
                     cycle['android_app_covered_ready'] = app_watch.running()
                     cycle['android_app_transition'] = app_watch.finish({mode:lambda mode=mode:counters()['app_'+mode][app_before[mode]:] for mode in APP_MODES})
                     app_watch.close(); app_watch = None
+                    if underlay:
+                        cycle['underlay_observations']={mode:len(v)-underlay_before[mode] for mode,v in underlay_counts().items()}
                 if watches:
                     cycle['transition']={}
                     for protocol,before,watch in watches:
@@ -368,12 +423,14 @@ def main():
                         raise RuntimeError('Continuous handover packet/source assertion failed')
                 if args.android_app_probe and (not cycle['android_app_covered_ready'] or not all(x['passed'] for x in cycle['android_app_transition'].values())):
                     raise RuntimeError('Ordinary-app handover packet/source assertion failed')
+                if underlay and any(cycle['underlay_observations'].values()):
+                    raise RuntimeError('Ordinary-app handover reached the physical listener')
                 for protocol,port in [('tcp',30101),('udp',30102)]:
                     before=len(counters()[protocol])
-                    probe=adb('shell','/data/local/tmp/cmfa-physical-probe',protocol+'-client','10.126.0.1',str(port),timeout=60)
-                    if 'PASS 5/5' not in probe.stdout or counters()[protocol][before:]!=['10.126.0.2']*5:
+                    probe=adb('shell','/data/local/tmp/cmfa-physical-probe',protocol+'-client',peer_address,str(port),timeout=60)
+                    if 'PASS 5/5' not in probe.stdout or counters()[protocol][before:]!=[phone_address]*5:
                         raise RuntimeError('Mesh did not recover after interface rebuild')
-                probe=docker('ping','-c','5','-W','2','10.126.0.2',timeout=30)
+                probe=docker('ping','-c','5','-W','2',phone_address,timeout=30)
                 if not re.search(r'5 (?:packets )?received',probe.stdout): raise RuntimeError('Inbound ICMP failed after rebuild')
                 if lan: lan_probe('tcp',True); lan_probe('reject',False)
                 cycle.update({'passed':True,'outbound_tcp':'5/5','outbound_udp':'5/5','inbound_icmp':'5/5','session_preserved':True})
@@ -402,7 +459,7 @@ def main():
                         state=json.loads(read('status.json'))
                         if state.get('stage','').startswith('ET_'): raise RuntimeError('Network return failed permanently')
                         if state.get('stage')=='active' and state.get('physical_transport')=='wifi' and state.get('network_revision',0)>original.get('network_revision',0):
-                            ready=adb('shell','ping','-c','1','-W','1','10.126.0.1',check=False,timeout=5)
+                            ready=adb('shell','ping','-c','1','-W','1',peer_address,check=False,timeout=5)
                             if ready.returncode==0: break
                         time.sleep(.5)
                     else: raise RuntimeError('Mesh did not recover after Wi-Fi return')
@@ -410,10 +467,10 @@ def main():
                     if state['interface_revision']!=original['interface_revision']: raise RuntimeError('Physical handover unnecessarily replaced the VPN interface')
                     for protocol,port in [('tcp',30101),('udp',30102)]:
                         before=len(counters()[protocol])
-                        probe=adb('shell','/data/local/tmp/cmfa-physical-probe',protocol+'-client','10.126.0.1',str(port),timeout=60)
-                        if 'PASS 5/5' not in probe.stdout or counters()[protocol][before:]!=['10.126.0.2']*5:
+                        probe=adb('shell','/data/local/tmp/cmfa-physical-probe',protocol+'-client',peer_address,str(port),timeout=60)
+                        if 'PASS 5/5' not in probe.stdout or counters()[protocol][before:]!=[phone_address]*5:
                             raise RuntimeError('Mesh packets failed after Wi-Fi return')
-                    probe=docker('ping','-c','5','-W','2','10.126.0.2',timeout=30)
+                    probe=docker('ping','-c','5','-W','2',phone_address,timeout=30)
                     if not re.search(r'5 (?:packets )?received',probe.stdout): raise RuntimeError('Inbound Wi-Fi recovery failed')
                     if lan: lan_probe('tcp',True); lan_probe('reject',False)
                     cycles.append({'cycle':cycle,'observed_disconnect_stage':disconnected,'outbound_tcp':'5/5','outbound_udp':'5/5','inbound_icmp':'5/5','session_preserved':True,'interface_preserved':True,'cellular_mesh_transport_validated':False})
@@ -443,8 +500,8 @@ def main():
                     else:raise RuntimeError('Private-network bypass setting did not apply')
                     proxy_probe(bypass)
                     before=len(counters()['tcp'])
-                    mesh=adb('shell','/data/local/tmp/cmfa-physical-probe','tcp-client','10.126.0.1','30101',timeout=60)
-                    if 'PASS 5/5' not in mesh.stdout or counters()['tcp'][before:]!=['10.126.0.2']*5:
+                    mesh=adb('shell','/data/local/tmp/cmfa-physical-probe','tcp-client',peer_address,'30101',timeout=60)
+                    if 'PASS 5/5' not in mesh.stdout or counters()['tcp'][before:]!=[phone_address]*5:
                         raise RuntimeError('Private-network bypass lost mesh ownership')
                     result['checks']['bypass_private_'+str(bypass).lower()]={'nonmesh_expected':'direct' if bypass else 'authenticated-proxy','tcp':'5/5','udp':'5/5','mesh_tcp':'5/5'}
                     print('bypass-private '+str(bypass)+': original nonmesh path and mesh capture passed',flush=True)
@@ -458,6 +515,9 @@ def main():
         output=(root/(args.phase+'-instrumentation.txt')).read_text(encoding='utf-8')
         if instrumentation.returncode or 'OK (1 test)' not in output or 'FAILURES!!!' in output:
             raise RuntimeError('Physical instrumentation failed; inspect private report')
+        if underlay:
+            result['checks']['underlay_after']=positive_control(92)
+            result['alternate_path_validated_before_and_after']=True
         result['passed']=True
         if args.phase=='lifecycle':
             result['checks']['completed_cycles']=10
@@ -528,4 +588,9 @@ def main():
         print(json.dumps(result),flush=True)
 
 
-if __name__=='__main__': main()
+if __name__=='__main__':
+    try: main()
+    except Exception as error:
+        # ADB command exceptions can contain a physical device identifier.
+        print(json.dumps({'fixture_failed':type(error).__name__}),flush=True)
+        raise SystemExit(1) from None

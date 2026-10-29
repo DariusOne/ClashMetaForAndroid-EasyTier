@@ -75,7 +75,7 @@ class AndroidUidWatch:
         for mode,result in results.items():
             peer = sources[mode]()
             result.update(peer_observed=len(peer), peer_wrong_source=sum(ip != self.expected_source for ip in peer))
-            result['passed'] = (result['received'] > 0 and result['wrong_source'] == 0 and
+            result['passed'] = (result['received'] > 0 and len(peer) > 0 and result['wrong_source'] == 0 and
                 result['invalid_payload'] == 0 and result['peer_wrong_source'] == 0 and not result.get('failure_code'))
         return results
 

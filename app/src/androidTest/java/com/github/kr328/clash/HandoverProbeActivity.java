@@ -2,6 +2,7 @@ package com.github.kr328.clash;
 
 import android.app.Activity;
 import android.content.pm.ApplicationInfo;
+import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Process;
@@ -118,13 +119,25 @@ public final class HandoverProbeActivity extends Activity {
             finish(); return;
         }
         final AtomicInteger remaining = new AtomicInteger(4);
+        final Intent keeper = "com.github.metacubex.clash.socketprobe".equals(getPackageName())
+                ? new Intent().setClassName(getPackageName(), "fixture.phone.ProbeKeepAliveService") : null;
+        if (keeper != null) {
+            try { startForegroundService(keeper); }
+            catch (RuntimeException failure) {
+                Log.w("HandoverProbe", "FIXTURE_FOREGROUND_FAILED");
+                finish(); return;
+            }
+        }
         for (String mode : new String[] {"tcp", "udp", "tcp4", "udp4"}) {
             final int port = "tcp".equals(mode) ? tcp : "udp".equals(mode) ? udp :
                     "tcp4".equals(mode) ? tcp4 : udp4;
             new Thread(() -> {
                 try { probe(mode, port, sequence, owner); }
                 finally {
-                    if (remaining.decrementAndGet() == 0) runOnUiThread(this::finish);
+                    if (remaining.decrementAndGet() == 0) runOnUiThread(() -> {
+                        if (keeper != null) stopService(keeper);
+                        finish();
+                    });
                 }
             }, "handover-" + mode).start();
         }

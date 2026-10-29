@@ -84,3 +84,10 @@ its original evidence remains in [the historical investigation](ANDROID11-HANDOV
 The minimum-version change therefore does not close the dynamic handover gate.
 No failed APK is released, no system setting workaround is silently adopted,
 and UI/generator rollout remains behind the [device gate](DEVICE-ACCEPTANCE.md).
+
+The [2026-10-29 physical comparison](PHYSICAL-COMPARISON-20261029.md) adds ordinary
+application-UID probes and before/after alternate-path controls. The API 37 phone
+passed three replacements with no observed escape; the same code's API 31 run
+still failed its third replacement. Verified diagnostic APK retention is now
+explicitly separated from release/acceptance. Original-app replacement parity
+and different-subnet packet paths remain unaccepted.

@@ -123,6 +123,22 @@ restores Wi-Fi even on failure. A private LAN peer cannot validate mesh traffic
 over cellular; do not label this as cellular peer acceptance. Neither option
 changes the original apps or desktop network settings.
 
+`--android-app-probe` additionally requires the separately installed non-VPN
+APK built by `build-physical-socket-probe.py`. It shares the CI ordinary-app
+socket code but uses private expiring phone consent. Its temporary foreground
+service prevents vendor background freezing without any battery-setting change.
+`--fixture-key` may reuse that diagnostic's own key to update it in place.
+`--underlay-fixture` requires a live `physical_underlay_echo.py` observer at the
+same target/ports as the isolated mesh peer. It verifies positive controls before
+and after, and requires zero alternate-path observations during the mesh test.
+`--mesh-peer-address` and `--mesh-phone-address` accept explicit private fixture
+addresses; the latter must match `phone.toml`. The peer's return route must be
+verified independently. Defaults preserve the existing CI topology. Do not
+change user routes to make this observer reachable.
+
+Stock-app trigger differences, invalid fixture attempts and the finite-window
+limits are recorded in [the physical comparison](PHYSICAL-COMPARISON-20261029.md).
+
 `--proxy-fixture` consumes private metadata from `physical_socks_peer.py`. That
 helper accepts only the selected phone, requires a fresh one-use SOCKS identity,
 and echoes one fixed synthetic target without forwarding arbitrary traffic.
