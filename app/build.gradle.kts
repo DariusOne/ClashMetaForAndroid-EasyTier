@@ -8,6 +8,10 @@ plugins {
     id("com.android.application")
 }
 
+android {
+    defaultConfig.testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+}
+
 dependencies {
     compileOnly(project(":hideapi"))
 
@@ -26,6 +30,8 @@ dependencies {
     implementation(libs.google.material)
     implementation(libs.quickie.bundled)
     implementation(libs.androidx.activity.ktx)
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
 }
 
 tasks.getByName("clean", type = Delete::class) {

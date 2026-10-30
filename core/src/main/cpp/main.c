@@ -2,6 +2,9 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
+#include <net/if.h>
+#include <linux/if_tun.h>
+#include <sys/ioctl.h>
 
 #include "bridge_helper.h"
 #include "libclash.h"
@@ -133,6 +136,60 @@ Java_com_github_kr328_clash_core_bridge_Bridge_nativeStopTun(JNIEnv *env, jobjec
     TRACE_METHOD();
 
     stopTun();
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_github_kr328_clash_core_easytier_NativePacketRouter_start(JNIEnv *env, jobject thiz,
+                                                                jint fd, jint mesh_fd,
+                                                                jstring configuration, jobject cb) {
+    scoped_string config = get_string(configuration);
+    jobject callback = new_global(cb);
+    return startPacketTun(fd, mesh_fd, config, callback) == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_github_kr328_clash_core_easytier_NativePacketRouter_update(JNIEnv *env, jobject thiz,
+                                                                 jstring snapshot, jstring installed) {
+    scoped_string state = get_string(snapshot);
+    scoped_string addresses = get_string(installed);
+    return updatePacketMesh(state, addresses) == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_github_kr328_clash_core_easytier_NativePacketRouter_failClosed(JNIEnv *env, jobject thiz,
+                                                                     jlong generation) {
+    closePacketMesh(generation);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_github_kr328_clash_core_easytier_NativePacketRouter_suspendInterface(JNIEnv *env, jobject thiz,
+                                                                          jlong generation) {
+    return suspendPacketInterface(generation) == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+/* Borrow only: Java retains the descriptor until the OS route commit is seen. */
+JNIEXPORT jstring JNICALL
+Java_com_github_kr328_clash_core_easytier_NativePacketRouter_interfaceName(JNIEnv *env, jobject thiz,
+                                                                       jint fd) {
+    struct ifreq request;
+    memset(&request, 0, sizeof(request));
+    if (fd < 0 || ioctl(fd, TUNGETIFF, &request) < 0) return NULL;
+    request.ifr_name[IFNAMSIZ - 1] = '\0';
+    return (*env)->NewStringUTF(env, request.ifr_name);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_github_kr328_clash_core_easytier_NativePacketRouter_replaceInterface(JNIEnv *env, jobject thiz,
+                                                                          jint fd, jstring request) {
+    scoped_string configuration = get_string(request);
+    return replacePacketInterface(fd, configuration) == 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_github_kr328_clash_core_easytier_NativePacketRouter_refreshNetwork(JNIEnv *env, jobject thiz,
+                                                                        jstring request) {
+    scoped_string configuration = get_string(request);
+    return refreshPacketNetwork(configuration) == 0 ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jstring JNICALL

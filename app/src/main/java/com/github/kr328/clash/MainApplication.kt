@@ -24,6 +24,9 @@ class MainApplication : Application() {
         super.onCreate()
 
         val processName = currentProcessName
+        // The native engine never loads the Clash runtime/profile assets or
+        // announces that the separate Clash service has restarted.
+        if (processName == "$packageName:native_mesh") return
         extractGeoFiles()
 
         Log.d("Process $processName started")

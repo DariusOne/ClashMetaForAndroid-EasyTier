@@ -1,0 +1,43 @@
+name: Android 12+ public API handover control
+on:
+  push:
+    branches: [feat/easytier-native]
+    paths: ['diagnostics/android11-dropvpn/**', '.github/workflows/android-vpn-handover-control.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  drop-only-control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [31, 35]
+    env:
+      CMFA_CONTROL_API: ${{ matrix.api }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Install SDK tools for tiny Java fixture APKs
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" > /dev/null'
+      - name: Enable disposable emulator KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save
+          script: python3 diagnostics/android11-dropvpn/run.py
+      - name: Upload diagnostic data only
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: public-api-drop-vpn-control-api-${{ matrix.api }}
+          path: diagnostics/android11-dropvpn/result/
+          retention-days: 14
+          if-no-files-found: warn

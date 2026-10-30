@@ -1,8 +1,12 @@
 module foss
 
-go 1.20
+go 1.23
 
 require cfa v0.0.0
+
+require github.com/DariusOne/ClashMetaForAndroid-EasyTier/native/packet-router v0.0.0 // indirect
+
+replace github.com/DariusOne/ClashMetaForAndroid-EasyTier/native/packet-router => ../../../../native/packet-router
 
 require (
 	github.com/RyuaNerin/go-krypto v1.3.0 // indirect

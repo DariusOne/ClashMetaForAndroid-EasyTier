@@ -1,0 +1,245 @@
+//go:build linux && with_gvisor
+
+package tun
+
+import (
+	"encoding/binary"
+	"encoding/json"
+	"net/netip"
+	"os"
+	"syscall"
+	"testing"
+	"time"
+
+	router "github.com/DariusOne/ClashMetaForAndroid-EasyTier/native/packet-router"
+	C "github.com/metacubex/mihomo/constant"
+)
+
+func sessionConfig() PacketSessionConfig {
+	return PacketSessionConfig{
+		Policy:  router.Config{Mode: router.Combined, Session: 42, Profile: "fixture", Network: "wifi", VirtualNetworks: []netip.Prefix{netip.MustParsePrefix("10.77.0.0/24")}, DeviceAddresses: []netip.Addr{netip.MustParseAddr("10.77.0.2")}},
+		Gateway: []netip.Prefix{netip.MustParsePrefix("172.19.0.1/30")}, MTU: 1380,
+	}
+}
+
+func packetPair(t *testing.T) (int, *os.File) {
+	t.Helper()
+	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_DGRAM|syscall.SOCK_CLOEXEC|syscall.SOCK_NONBLOCK, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := os.NewFile(uintptr(fds[1]), "fixture-peer")
+	t.Cleanup(func() { f.Close() })
+	return fds[0], f
+}
+
+func ipFrame(src, dst [4]byte) []byte {
+	p := make([]byte, 28)
+	p[0], p[8], p[9] = 0x45, 64, 1
+	binary.BigEndian.PutUint16(p[2:4], uint16(len(p)))
+	copy(p[12:16], src[:])
+	copy(p[16:20], dst[:])
+	p[20] = 8
+	return p
+}
+
+func TestPhysicalNetworkRefreshKeepsPacketInterface(t *testing.T) {
+	tunFD, app := packetPair(t)
+	meshFD, native := packetPair(t)
+	h, err := StartPacketSession(tunFD, meshFD, sessionConfig(), &echoTunnel{seen: make(chan *C.Metadata, 8)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	s := router.NativeSnapshot{Schema: 1, Generation: 42, Running: true, Attached: true, Addresses: []string{"10.77.0.2/24"}}
+	installed := []netip.Prefix{netip.MustParsePrefix("10.77.0.2/24")}
+	outgoing := ipFrame([4]byte{10, 77, 0, 2}, [4]byte{10, 77, 0, 9})
+	incoming := ipFrame([4]byte{10, 77, 0, 9}, [4]byte{10, 77, 0, 2})
+	buf := make([]byte, 128)
+	for _, network := range []string{"wifi", "cell", "new-wifi"} {
+		if err := h.SetReady(42, false); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.RefreshNetwork(s, installed, network, nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := app.Write(outgoing); err != nil {
+			t.Fatal(err)
+		}
+		native.SetReadDeadline(time.Now().Add(time.Second))
+		if n, err := native.Read(buf); err != nil || string(buf[:n]) != string(outgoing) {
+			t.Fatalf("retained interface outbound: %v", err)
+		}
+		if _, err := native.Write(incoming); err != nil {
+			t.Fatal(err)
+		}
+		app.SetReadDeadline(time.Now().Add(time.Second))
+		if n, err := app.Read(buf); err != nil || string(buf[:n]) != string(incoming) {
+			t.Fatalf("retained interface inbound: %v", err)
+		}
+	}
+	if err := h.SuspendInterface(42); err != nil {
+		t.Fatal(err)
+	}
+	if h.RefreshNetwork(s, installed, "cell", nil) == nil {
+		t.Fatal("refresh reopened a paused replacement")
+	}
+}
+
+func TestPacketSessionLifecycleTenRestarts(t *testing.T) {
+	before, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 10; i++ {
+		tunFD, app := packetPair(t)
+		meshFD, native := packetPair(t)
+		h, err := StartPacketSession(tunFD, meshFD, sessionConfig(), &echoTunnel{seen: make(chan *C.Metadata, 8)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := router.NativeSnapshot{Schema: 1, Generation: 42, Running: true, Attached: true, Addresses: []string{"10.77.0.2/24"}}
+		if err := h.ApplySnapshot(s, []netip.Prefix{netip.MustParsePrefix("10.77.0.2/24")}); err != nil {
+			h.Close()
+			t.Fatal(err)
+		}
+		native.SetReadDeadline(time.Now().Add(time.Second))
+		outgoing := ipFrame([4]byte{10, 77, 0, 2}, [4]byte{10, 77, 0, 9})
+		if _, err := app.Write(outgoing); err != nil {
+			h.Close()
+			t.Fatal(err)
+		}
+		buf := make([]byte, 128)
+		n, err := native.Read(buf)
+		if err != nil || string(buf[:n]) != string(outgoing) {
+			h.Close()
+			t.Fatalf("mesh delivery %v", err)
+		}
+		incoming := ipFrame([4]byte{10, 77, 0, 9}, [4]byte{10, 77, 0, 2})
+		app.SetReadDeadline(time.Now().Add(time.Second))
+		if _, err := native.Write(incoming); err != nil {
+			h.Close()
+			t.Fatal(err)
+		}
+		n, err = app.Read(buf)
+		if err != nil || string(buf[:n]) != string(incoming) {
+			h.Close()
+			t.Fatalf("mesh return %v", err)
+		}
+		// After failure there is no mesh->Clash retry and no return to Android.
+		h.SetReady(42, false)
+		native.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
+		app.Write(outgoing)
+		if _, err := native.Read(buf); err == nil {
+			h.Close()
+			t.Fatal("not closed")
+		}
+		done := make(chan struct{})
+		go func() { h.Close(); h.Close(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("shutdown stranded a descriptor")
+		}
+		app.Close()
+		native.Close()
+	}
+	after, _ := os.ReadDir("/proc/self/fd")
+	// The first Go netpoll registration may lazily allocate two process-wide FDs.
+	if len(after) > len(before)+2 {
+		t.Fatalf("descriptor leak: before %d after %d", len(before), len(after))
+	}
+}
+
+func TestPacketSessionParser(t *testing.T) {
+	c := sessionConfig()
+	data, _ := json.Marshal(c)
+	if _, err := ParsePacketSession(data); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range [][]byte{[]byte(`{}`), append(data, []byte(` {}`)...), []byte(`{"credential":"never-accepted"}`)} {
+		if _, err := ParsePacketSession(bad); err == nil {
+			t.Fatal("invalid session accepted")
+		}
+	}
+	c.MTU = 9000
+	data, _ = json.Marshal(c)
+	if _, err := ParsePacketSession(data); err == nil {
+		t.Fatal("oversized mtu")
+	}
+}
+
+func TestInterfaceRebuildKeepsSessionAndWithdrawnRoutesClosed(t *testing.T) {
+	tunFD, oldApp := packetPair(t)
+	meshFD, native := packetPair(t)
+	h, err := StartPacketSession(tunFD, meshFD, sessionConfig(), &echoTunnel{seen: make(chan *C.Metadata, 8)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	s := router.NativeSnapshot{Schema: 1, Generation: 42, Running: true, Attached: true, Addresses: []string{"10.77.0.2/24"}, Routes: []string{"10.90.0.0/24"}}
+	installed := []netip.Prefix{netip.MustParsePrefix("10.77.0.2/24")}
+	if err := h.ApplySnapshot(s, installed); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := h.SuspendInterface(42); err != nil {
+			t.Fatal(err)
+		}
+		oldApp.Close() // Android closes old TUN while establish is in progress.
+		if h.policy.Decide(netip.MustParseAddr("10.77.0.9")) != router.Drop {
+			t.Fatal("rebuild was not closed")
+		}
+		newFD, newApp := packetPair(t)
+		s.Routes = nil // withdrawn ownership MUST survive, no new Policy/Begin.
+		if err := h.ReplaceInterface(newFD, s, installed, "new-wifi", nil); err != nil {
+			t.Fatal(err)
+		}
+		if h.policy.Decide(netip.MustParseAddr("10.90.0.9")) != router.Drop {
+			t.Fatal("withdrawal fell through")
+		}
+		out := ipFrame([4]byte{10, 77, 0, 2}, [4]byte{10, 77, 0, 9})
+		native.SetReadDeadline(time.Now().Add(time.Second))
+		if _, err := newApp.Write(out); err != nil {
+			t.Fatal(err)
+		}
+		buf := make([]byte, 128)
+		n, err := native.Read(buf)
+		if err != nil || string(buf[:n]) != string(out) {
+			t.Fatalf("same native endpoint did not recover: %v", err)
+		}
+		in := ipFrame([4]byte{10, 77, 0, 9}, [4]byte{10, 77, 0, 2})
+		newApp.SetReadDeadline(time.Now().Add(time.Second))
+		native.Write(in)
+		n, err = newApp.Read(buf)
+		if err != nil || string(buf[:n]) != string(in) {
+			t.Fatalf("new Android interface not used: %v", err)
+		}
+		oldApp = newApp
+	}
+	if err := h.SuspendInterface(42); err != nil {
+		t.Fatal(err)
+	}
+	newFD, _ := packetPair(t)
+	stale := s
+	stale.Generation = 41
+	if h.ReplaceInterface(newFD, stale, installed, "stale", nil) == nil {
+		t.Fatal("stale replacement accepted")
+	}
+	if err := syscall.Close(newFD); err != syscall.EBADF {
+		t.Fatal("rejected FD not adopted/closed")
+	}
+	if h.policy.Decide(netip.MustParseAddr("10.77.0.9")) != router.Drop {
+		t.Fatal("failed replacement reopened routing")
+	}
+	newFD, _ = packetPair(t)
+	if err := h.ReplaceInterface(newFD, s, installed, "overlapping-wifi", []netip.Prefix{netip.MustParsePrefix("10.77.0.0/24")}); err != nil {
+		t.Fatal(err)
+	}
+	if h.policy.Decide(netip.MustParseAddr("10.77.0.9")) != router.Drop {
+		t.Fatal("new LAN overlap inherited approval")
+	}
+	if h.policy.Decide(netip.MustParseAddr("192.168.44.1")) != router.Clash {
+		t.Fatal("unrelated private route changed")
+	}
+}

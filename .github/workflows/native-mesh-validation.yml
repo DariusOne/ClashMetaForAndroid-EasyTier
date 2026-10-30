@@ -1,0 +1,249 @@
+name: Native mesh prototype validation
+on:
+  push:
+    branches: [feat/easytier-native]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: native-mesh-${{ github.sha }}
+  cancel-in-progress: true
+jobs:
+  changed-components:
+    runs-on: ubuntu-latest
+    outputs:
+      native: ${{ steps.paths.outputs.native }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+      - id: paths
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          python3 - <<'PY'
+          import os, re, subprocess
+          base = os.environ.get('BEFORE_SHA', '')
+          native = True
+          if os.environ['EVENT_NAME'] == 'push' and re.fullmatch(r'[0-9a-f]{40}', base) and base != '0' * 40:
+              paths = subprocess.check_output(['git','diff','--name-only',base,'HEAD'],text=True).splitlines()
+              native = any(p.startswith(('native/','core/src/main/','service/src/main/','app/src/androidTest/','scripts/fixtures/','scripts/fixture_')) or p in ('.gitmodules','scripts/build-easytier-android.py','scripts/prepare-mihomo.py','scripts/test_prepare_mihomo.py','scripts/test-packet-prototype-emulator.py','scripts/test-packet-native-peer.py','scripts/test-packet-handover-matrix.py','build.gradle.kts','core/build.gradle.kts','app/src/main/java/com/github/kr328/clash/MainApplication.kt','.github/workflows/native-mesh-validation.yml') for p in paths)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('native=' + str(native).lower() + '\n')
+          PY
+  packet-router:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Install checksum-pinned CMFA Go toolchain
+        run: |
+          curl --fail --location --output "$RUNNER_TEMP/go.tar.gz" https://github.com/MetaCubeX/go/releases/download/build/go1.26.linux-amd64.tar.gz
+          echo "c1278af2579c9398cf22c638686e5348926b160eda784930d416d95aaa7a9221  $RUNNER_TEMP/go.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/go.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/go/bin" >> "$GITHUB_PATH"
+      - name: Race, socket transport and fuzz tests
+        working-directory: native/packet-router
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          go test -race -count=1 -timeout 90s -coverprofile=coverage.out ./...
+          go test -run '^$' -fuzz FuzzDestinationIP -fuzztime 15s
+          GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build ./...
+          GOOS=android GOARCH=amd64 CGO_ENABLED=0 go build ./...
+  mihomo-packet-adapter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          submodules: true
+      - name: Install checksum-pinned CMFA Go toolchain
+        run: |
+          curl --fail --location --output "$RUNNER_TEMP/go.tar.gz" https://github.com/MetaCubeX/go/releases/download/build/go1.26.linux-amd64.tar.gz
+          echo "c1278af2579c9398cf22c638686e5348926b160eda784930d416d95aaa7a9221  $RUNNER_TEMP/go.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/go.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/go/bin" >> "$GITHUB_PATH"
+      - name: Apply hash-checked Mihomo ownership fix
+        run: |
+          python3 scripts/test_prepare_mihomo.py
+          python3 scripts/prepare-mihomo.py
+      - name: Bounded physical SOCKS fixture regression
+        run: python3 scripts/test_physical_socks_peer.py
+      - name: Atomic Android fixture publication regression
+        run: python3 scripts/test_fixture_file_stage.py
+      - name: Ordinary-app evidence and physical diagnostic isolation regression
+        run: python3 scripts/test_android_uid_watch.py
+      - name: Bounded alternate-path observer regression
+        run: python3 scripts/test_physical_underlay_echo.py
+      - name: Continuous handover probe bounds and wrong-source regression
+        run: go test -count=1 scripts/fixtures/transition_probe.go scripts/fixtures/transition_probe_test.go
+      - name: NDK counterpart host deadline and wrong-source regression
+        run: python3 scripts/test_transition_c_probe.py
+      - name: Real TCP and UDP through the Mihomo packet adapter
+        working-directory: core/src/main/golang
+        env:
+          CGO_ENABLED: '1'
+        run: go test -mod=readonly -race -tags 'foss,with_gvisor,cmfa,debug' -count=1 -timeout 90s ./native/tun ./native/compat
+  native-engine:
+    needs: changed-components
+    if: needs.changed-components.outputs.native == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, x86_64]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          submodules: true
+      - name: Reuse only native libraries with identical locked inputs
+        id: native-cache
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: core/build/native-jni/${{ matrix.abi }}/
+          key: native-payload-v1-${{ runner.os }}-${{ matrix.abi }}-${{ hashFiles('native/easytier-bridge/src/**/*.rs', 'native/easytier-bridge/Cargo.toml', 'native/easytier-bridge/Cargo.lock', 'scripts/build-easytier-android.py') }}
+      - name: Install build dependencies
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler cmake clang pkg-config
+          rustup toolchain install 1.95.0 --profile minimal
+          rustup target add --toolchain 1.95.0 aarch64-linux-android x86_64-linux-android
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'ndk;29.0.14206865'
+      - name: Build native adapter
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        run: python3 scripts/build-easytier-android.py --abi '${{ matrix.abi }}'
+      - name: Verify artifact input identity and digest
+        run: python3 scripts/build-easytier-android.py --abi '${{ matrix.abi }}' --verify-only
+      - name: Upload unvalidated native prototype
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: native-prototype-${{ matrix.abi }}
+          path: core/build/native-jni/${{ matrix.abi }}/
+          if-no-files-found: error
+          retention-days: 14
+  native-host-tests:
+    needs: changed-components
+    if: needs.changed-components.outputs.native == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          submodules: true
+      - name: Cache locked host compiler inputs (tests always run)
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: |
+            ~/.cargo/registry/
+            ~/.cargo/git/
+            native/easytier-bridge/target/
+          key: native-host-rust195-v1-${{ runner.os }}-${{ hashFiles('native/easytier-bridge/Cargo.lock', 'native/easytier-bridge/Cargo.toml', 'native/easytier-bridge/src/**/*.rs') }}
+      - name: Install host build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler cmake clang pkg-config
+          rustup toolchain install 1.95.0 --profile minimal
+      - name: Native config validation and panic prevention
+        env:
+          CARGO_BUILD_JOBS: '2'
+        run: cargo +1.95.0 test --locked --manifest-path native/easytier-bridge/Cargo.toml --lib
+  packet-prototype-apk:
+    needs: [native-engine, native-host-tests, packet-router, mihomo-packet-adapter]
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          submodules: recursive
+      - name: Cache compiler dependencies (APK and tests always rebuild)
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25
+        with:
+          path: |
+            ~/.gradle/caches/
+            ~/.gradle/wrapper/
+            ~/.cache/go-build/
+            ~/go/pkg/mod/
+          key: packet-compiler-v1-${{ runner.os }}-jdk21-go126-c1278af-${{ hashFiles('**/go.mod', '**/go.sum', '**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties', '.github/patch/*.patch') }}
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: native-prototype-arm64-v8a
+          path: core/build/native-jni/arm64-v8a
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          name: native-prototype-x86_64
+          path: core/build/native-jni/x86_64
+      - name: Set up pinned compiler and Java 21
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_21_X64/bin" >> "$GITHUB_PATH"
+          curl --fail --location --output "$RUNNER_TEMP/go.tar.gz" https://github.com/MetaCubeX/go/releases/download/build/go1.26.linux-amd64.tar.gz
+          echo "c1278af2579c9398cf22c638686e5348926b160eda784930d416d95aaa7a9221  $RUNNER_TEMP/go.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/go.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/go/bin" >> "$GITHUB_PATH"
+          cd "$RUNNER_TEMP/go"
+          for p in "$GITHUB_WORKSPACE"/.github/patch/*.patch; do patch -p 1 < "$p"; done
+      - name: Compile opt-in packet prototype with a separate application ID
+        run: ./gradlew --no-daemon -PnativeMeshHarness=true service:testMetaDebugUnitTest app:assembleMetaDebug app:assembleMetaDebugAndroidTest
+      - name: Verify separate identity and both native libraries in APK
+        id: verify-apk
+        run: python3 scripts/verify-packet-prototype.py app/build/outputs/apk/meta/debug
+      - name: Build physical-device arm64 packet probe
+        run: |
+          mkdir -p app/build/physical-device-tools
+          "$ANDROID_HOME/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang" -Wall -Wextra -Werror -O2 scripts/fixtures/mesh_probe.c -o app/build/physical-device-tools/cmfa-mesh-probe-arm64
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o app/build/physical-device-tools/discovery-probe-arm64 scripts/fixtures/discovery_probe.go
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o app/build/physical-device-tools/transition-probe-arm64 scripts/fixtures/transition_probe.go
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o app/build/physical-device-tools/discovery-probe-amd64 scripts/fixtures/discovery_probe.go
+      - name: Enable KVM for disposable CI emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Native VPN lifecycle and strict handover on Android 12
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 31
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save
+          script: |
+            python3 scripts/test-packet-prototype-emulator.py
+            CMFA_SYSTEM_LOCKDOWN_DIAGNOSTIC=0 python3 scripts/test-packet-native-peer.py
+      - name: Upload emulator evidence (not real-device acceptance)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: packet-prototype-emulator-evidence
+          path: |
+            app/build/reports/native-mesh-emulator/
+            app/build/reports/native-mesh-peer/
+            app/build/reports/native-mesh-peer-lockdown/
+          if-no-files-found: warn
+          retention-days: 14
+      # These are diagnostic inputs for the explicitly authorized real-phone
+      # comparison. A failed emulator gate stays failed; this is not a release.
+      - name: Preserve verified separate APK for physical diagnosis, not acceptance
+        if: ${{ always() && steps.verify-apk.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: packet-path-prototype-NOT-ACCEPTED-DIAGNOSTIC
+          path: |
+            app/build/outputs/apk/meta/debug/*universal*.apk
+            app/build/outputs/apk/meta/debug/prototype-verification.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload explicit physical-device test tools
+        if: ${{ always() && steps.verify-apk.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: physical-device-test-tools-NOT-acceptance-results
+          path: |
+            app/build/outputs/apk/androidTest/meta/debug/*.apk
+            app/build/physical-device-tools/
+          if-no-files-found: error
+          retention-days: 14

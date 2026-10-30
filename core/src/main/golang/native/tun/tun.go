@@ -31,7 +31,7 @@ func Start(fd int, stack, gateway, portal, dns string) (io.Closer, error) {
 		}
 		prefix, err := netip.ParsePrefix(gatewayStr)
 		if err != nil {
-			log.Errorln("TUN:", err)
+			log.Errorln("TUN: %v", err)
 			return nil, err
 		}
 
@@ -69,7 +69,7 @@ func Start(fd int, stack, gateway, portal, dns string) (io.Closer, error) {
 
 	listener, err := sing_tun.New(options, tunnel.Tunnel)
 	if err != nil {
-		log.Errorln("TUN:", err)
+		log.Errorln("TUN: %v", err)
 		return nil, err
 	}
 

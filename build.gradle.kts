@@ -20,6 +20,18 @@ buildscript {
     }
 }
 
+// Explicit debug-only backport for an authorized API 30 physical comparison.
+// It does not alter the pinned Android 17 delivery or normal build defaults.
+val nativeMeshDiagnosticApi30 = providers.gradleProperty("nativeMeshDiagnosticApi30").orNull == "true"
+check(!nativeMeshDiagnosticApi30 || providers.gradleProperty("nativeMeshHarness").orNull == "true") {
+    "API 30 diagnostics require the separate native harness"
+}
+gradle.taskGraph.whenReady {
+    check(!nativeMeshDiagnosticApi30 || allTasks.none { it.name.contains("release", ignoreCase = true) }) {
+        "API 30 diagnostics are debug-only and cannot produce a release"
+    }
+}
+
 subprojects {
     repositories {
         mavenCentral()
@@ -45,9 +57,13 @@ subprojects {
     extensions.configure<BaseExtension> {
         buildFeatures.buildConfig = true
         defaultConfig {
+            val nativeMeshHarness = providers.gradleProperty("nativeMeshHarness").orNull == "true"
+            buildConfigField("boolean", "NATIVE_MESH_HARNESS", nativeMeshHarness.toString())
+            buildConfigField("int", "NATIVE_MESH_MIN_API", if (nativeMeshDiagnosticApi30) "30" else "31")
             if (isApp) {
                 val customApplicationId = queryConfigProperty("custom.application.id") as? String?
                 applicationId = customApplicationId.takeIf { it?.isNotBlank() == true } ?: "com.github.metacubex.clash"
+                if (nativeMeshHarness) applicationId = applicationId + ".meshprototype"
             }
 
             project.name.let { name ->
@@ -55,7 +71,9 @@ subprojects {
                 else "com.github.kr328.clash.$name"
             }
 
-            minSdk = 21
+            // Native combined mode supports Android 12+; the upstream-like
+            // proxy-only build keeps its independent compatibility contract.
+            minSdk = if (nativeMeshHarness) { if (nativeMeshDiagnosticApi30) 30 else 31 } else 21
             targetSdk = 35
 
             versionName = "2.11.36"
@@ -65,12 +83,12 @@ subprojects {
             resValue("integer", "release_code", "$versionCode")
 
             ndk {
-                abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+                abiFilters += if (nativeMeshHarness) listOf("arm64-v8a", "x86_64") else listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
             }
 
             externalNativeBuild {
                 cmake {
-                    abiFilters("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+                    if (nativeMeshHarness) abiFilters("arm64-v8a", "x86_64") else abiFilters("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
                 }
             }
 
@@ -132,14 +150,27 @@ subprojects {
                     applicationIdSuffix = ".meta"
                 }
             }
+            if (providers.gradleProperty("nativeMeshHarness").orNull == "true") {
+                all {
+                    val label = "Clash Easytier"
+                    resValue("string", "launch_name", label)
+                    resValue("string", "application_name", label)
+                }
+            }
         }
 
         sourceSets {
             getByName("meta") {
                 java.srcDirs("src/foss/java")
+                if (isApp && providers.gradleProperty("nativeMeshHarness").orNull == "true") {
+                    res.srcDir("src/nativeMesh/res")
+                }
             }
             getByName("alpha") {
                 java.srcDirs("src/foss/java")
+                if (isApp && providers.gradleProperty("nativeMeshHarness").orNull == "true") {
+                    res.srcDir("src/nativeMesh/res")
+                }
             }
         }
 
@@ -188,7 +219,8 @@ subprojects {
                     isEnable = true
                     isUniversalApk = true
                     reset()
-                    include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+                    if (providers.gradleProperty("nativeMeshHarness").orNull == "true") include("arm64-v8a", "x86_64")
+                    else include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
                 }
             }
         }

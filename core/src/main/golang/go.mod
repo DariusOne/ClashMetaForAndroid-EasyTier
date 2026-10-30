@@ -1,14 +1,19 @@
 module cfa
 
-go 1.20
+go 1.23
 
 require (
+	github.com/DariusOne/ClashMetaForAndroid-EasyTier/native/packet-router v0.0.0
 	github.com/dlclark/regexp2 v1.12.0
+	github.com/metacubex/gvisor v0.0.0-20260922041103-e2cbcd6e7400
 	github.com/metacubex/mihomo v1.7.0
+	github.com/metacubex/sing-tun v0.4.28
 	golang.org/x/sync v0.11.0
 )
 
 replace github.com/metacubex/mihomo => ../../foss/golang/clash
+
+replace github.com/DariusOne/ClashMetaForAndroid-EasyTier/native/packet-router => ../../../../native/packet-router
 
 require (
 	github.com/RyuaNerin/go-krypto v1.3.0 // indirect
@@ -63,7 +68,6 @@ require (
 	github.com/metacubex/edwards25519 v1.2.0 // indirect
 	github.com/metacubex/fswatch v0.1.1 // indirect
 	github.com/metacubex/gopacket v1.1.20-0.20230608035415-7e2f98a3e759 // indirect
-	github.com/metacubex/gvisor v0.0.0-20260922041103-e2cbcd6e7400 // indirect
 	github.com/metacubex/hkdf v0.1.0 // indirect
 	github.com/metacubex/hpke v0.1.0 // indirect
 	github.com/metacubex/http v0.1.8 // indirect
@@ -85,7 +89,6 @@ require (
 	github.com/metacubex/sing-quic v0.0.0-20260904234848-1c242664697a // indirect
 	github.com/metacubex/sing-shadowsocks v0.2.13 // indirect
 	github.com/metacubex/sing-shadowsocks2 v0.2.8 // indirect
-	github.com/metacubex/sing-tun v0.4.28 // indirect
 	github.com/metacubex/sing-vmess v0.2.5 // indirect
 	github.com/metacubex/sing-wireguard v0.0.0-20261002050126-e5fa1a607406 // indirect
 	github.com/metacubex/smux v0.0.0-20260105030934-d0c8756d3141 // indirect

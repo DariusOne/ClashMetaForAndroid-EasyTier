@@ -2,3 +2,6 @@
 	path = core/src/foss/golang/clash
 	url = https://github.com/MetaCubeX/mihomo
 	branch = Alpha
+[submodule "native/easytier-upstream"]
+	path = native/easytier-upstream
+	url = https://github.com/EasyTier/EasyTier.git
