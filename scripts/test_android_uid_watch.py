@@ -27,6 +27,12 @@ class AppUidWatchTests(unittest.TestCase):
     def test_phone_uses_separate_non_instrumentation_package(self):
         self.assertEqual(PHYSICAL_PACKAGE,self.watch(physical_consent=self.token).package)
 
+    def test_physical_launch_confirmation_has_separate_bounded_wait(self):
+        for consent,expected in ((None,10),(self.token,60)):
+            with self.subTest(consent=bool(consent)), patch('fixture_android_uid_watch.subprocess.run',return_value=subprocess.CompletedProcess([],0,'','')) as run:
+                AndroidUidWatch(['adb'],1,self.ports,physical_consent=consent)
+                self.assertEqual(expected,run.call_args.kwargs['timeout'])
+
     def test_invalid_arguments_do_not_launch(self):
         for ports in ({}, dict.fromkeys(MODES,30111), dict(self.ports,tcp=80)):
             with self.subTest(ports=ports), patch('fixture_android_uid_watch.subprocess.run') as run:

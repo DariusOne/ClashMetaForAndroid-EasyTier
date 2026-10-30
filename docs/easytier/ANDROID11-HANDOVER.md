@@ -1,5 +1,11 @@
 # Android 11 interface handover: unresolved compatibility gate
 
+An authorized Mi 10 Pro / API 30 physical diagnostic was added on 2026-10-30.
+Its three replacement windows did not reproduce wrong-source traffic, but had
+26 unanswered requests. See the [physical report](ANDROID11-PHYSICAL-20261030.md)
+for the matched controls and limitations. It does not invalidate the emulator
+evidence below or expand the Android 17 preview delivery range.
+
 Historical record: on 2026-10-28 the user changed the integration's minimum
 supported version to Android 12. Android 11 is therefore outside that range;
 the failure evidence is preserved. Android 12+ still requires its own strict

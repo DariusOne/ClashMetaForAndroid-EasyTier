@@ -30,7 +30,10 @@ class AndroidUidWatch:
         launch = subprocess.run(adb + ['shell','am','start','-W','-f','0x10008000',
             '-n',self.package+'/com.github.kr328.clash.HandoverProbeActivity','--ei','sequence',str(sequence),
             ] + guard + extras,
-            capture_output=True, text=True, timeout=10)
+            # MIUI may require a visible, user-approved start confirmation on
+            # physical phones. Bound that interaction separately; the socket
+            # window and all network deadlines below remain unchanged.
+            capture_output=True, text=True, timeout=60 if physical_consent else 10)
         if launch.returncode or 'Error:' in launch.stdout or 'Error type ' in launch.stdout:
             combined = launch.stdout + launch.stderr
             code = ('UNKNOWN_OPTION' if 'Unknown option' in combined else

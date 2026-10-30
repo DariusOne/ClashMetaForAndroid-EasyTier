@@ -6,6 +6,7 @@
 为了交付已实测的同一 APK，其原有 manifest/target SDK 保持原样，不能据此宣称旧系统受支持。
 安装、分开导入 YAML/TOML、功能限制及回退见 [Android 17 交付说明](docs/easytier/ANDROID17-PREVIEW.md)。
 Android 12/15 的历史接口交接失败证据仍保留在 [历史验证结果](docs/easytier/ANDROID12-SUPPORT.md)。
+2026-10-30 已完成指定 Android 11 真机的独立诊断：[结果及范围限制](docs/easytier/ANDROID11-PHYSICAL-20261030.md)；正式支持范围不变。
 实现进度、测试边界和待完成验收见 [Native integration status](docs/easytier/IMPLEMENTATION.md)。
 
 ## Upstream Clash Meta for Android
