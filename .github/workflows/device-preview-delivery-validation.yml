@@ -1,0 +1,24 @@
+name: Two physical devices preview delivery checks
+on:
+  push:
+    branches: [feat/easytier-native]
+    paths:
+      - 'scripts/device_preview.py'
+      - 'scripts/test_device_preview.py'
+      - 'scripts/android17_preview.py'
+      - 'scripts/test_android17_preview.py'
+      - 'delivery/device-preview.json'
+      - 'delivery/android17-preview.json'
+      - '.github/workflows/device-preview-delivery-validation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  distribution-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Exact artifact selection, integrity, device limits and legacy compatibility
+        working-directory: scripts
+        run: python3 -m unittest test_device_preview test_android17_preview -v

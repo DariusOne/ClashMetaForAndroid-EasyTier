@@ -1,12 +1,12 @@
 ## Clash Meta for Android + native EasyTier (work in progress)
 
-**Android 17 预览版：先交付已在真机测试的原生 IPv4 数据通道 APK，完整整合仍在开发。**
+**双真机预览版：以已验收的 Android 11 / Android 17 真机交付原生 IPv4 数据通道，完整整合仍在开发。**
 只让 EasyTier 管理的地址进入组网，其余流量保留 CMFA 原配置语义。
-本次交付范围收敛为 **Android 17（API 37）、arm64 真机**；安装工具拒绝其他平台。
-为了交付已实测的同一 APK，其原有 manifest/target SDK 保持原样，不能据此宣称旧系统受支持。
-安装、分开导入 YAML/TOML、功能限制及回退见 [Android 17 交付说明](docs/easytier/ANDROID17-PREVIEW.md)。
-Android 12/15 的历史接口交接失败证据仍保留在 [历史验证结果](docs/easytier/ANDROID12-SUPPORT.md)。
-2026-10-30 已完成指定 Android 11 真机的独立诊断：[结果及范围限制](docs/easytier/ANDROID11-PHYSICAL-20261030.md)；正式支持范围不变。
+当前交付范围为 **Mi 10 Pro / API 30** 与 **25060RK16C / API 37** 两台已测 arm64 真机。
+同一包内分别保留两份精确实测 APK，由安装器按 API、架构和机型选择，不重新编译或修改其行为。
+安装、分开导入 YAML/TOML、功能限制及回退见 [双真机交付说明](docs/easytier/TWO-DEVICE-PREVIEW.md)。
+模拟器历史失败保留；按用户选择不再作为这两台真机有限预览交付的否决条件，不改标为通过。
+其他机型、系统版本及未完成的功能仍需各自验收；[旧 Android 17 包](docs/easytier/ANDROID17-PREVIEW.md)保留。
 实现进度、测试边界和待完成验收见 [Native integration status](docs/easytier/IMPLEMENTATION.md)。
 
 ## Upstream Clash Meta for Android

@@ -1,16 +1,20 @@
 # Device acceptance gate (not yet passed)
 
-Current delivery decision (2026-10-29): offer the exact tested APK as an
-[Android 17 arm64 preview](ANDROID17-PREVIEW.md). This narrows platform scope;
-it does not mark the unfinished rows below complete. Older-API failures remain
-historical evidence, not Android 17 acceptance. Normal CMFA remains unchanged.
+Current delivery decision (2026-10-30): use the two authorized physical results
+for a [two-device finite preview](TWO-DEVICE-PREVIEW.md): Mi 10 Pro / API 30 and
+25060RK16C / API 37, each with its own exact tested APK. Emulator failures remain
+valid and visible but are not a veto on this explicitly scoped delivery. They
+are never relabelled as passing. This does not mark unfinished functional rows
+below complete or accept other devices. Normal CMFA remains unchanged.
 
-As requested on 2026-10-28, native integration now targets **Android 12+ (API 31)**.
+Historical build decision (2026-10-28): native integration targets **Android 12+ (API 31)**.
 The integrated APK's minimum API and runtime guard reject older versions. The
 independent normal CMFA build is unchanged. Android 11 results below remain
 historical evidence, not a current support requirement. Fresh API 31 native
 handover and API 31/35 public-API controls are required before proceeding;
-raising the minimum alone is not acceptance. Existing routing, bypass-private,
+raising the minimum alone is not acceptance. The later API 30 diagnostic build
+has a separate explicit flag and is now included unchanged in the scoped preview.
+Existing routing, bypass-private,
 per-app selection and no-extra-system-setting requirements remain unchanged.
 
 The fresh API 31/35 public-API controls both reproduced transition escapes;

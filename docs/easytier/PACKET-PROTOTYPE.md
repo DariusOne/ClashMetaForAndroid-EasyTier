@@ -1,9 +1,9 @@
 # Packet-path prototype (not the finished application)
 
-For the 2026-10-29 interim delivery use [Android 17 preview instructions](ANDROID17-PREVIEW.md).
-They intentionally select the exact physically tested APK, constrain the installer
-to API 37 arm64, and retain the limitations below. Older manifest/CI support
-described here is diagnostic history, not the current delivery support range.
+For the current 2026-10-30 delivery use [two-device preview instructions](TWO-DEVICE-PREVIEW.md).
+They select each device's exact physically tested APK, constrain installation
+by API/ABI/model, and retain the limitations below. Manifest/CI support alone
+does not define the current delivery support range.
 
 This harness exists to make the native packet path testable before UI/generator
 rollout. The integrated APK requires **Android 12 / API 31 or later**, enforced
@@ -16,6 +16,10 @@ python3 scripts/build-easytier-android.py --abi arm64-v8a
 python3 scripts/build-easytier-android.py --abi x86_64
 ./gradlew -PnativeMeshHarness=true app:assembleMetaDebug
 ```
+
+The separate API 30 physical diagnostic uses `-PnativeMeshDiagnosticApi30=true`
+as well. It cannot build Release tasks; its tested debug APK is retained without
+recompilation for the Mi 10 Pro finite preview, not for general Android 11 support.
 
 Gradle runs `scripts/prepare-mihomo.py` before compiling Go. This applies two
 reviewed buffer releases to the pinned Mihomo `reject.go`, verifies the complete

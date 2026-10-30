@@ -1,8 +1,10 @@
 # Native EasyTier integration — implementation gate
 
-An interim [Android 17 arm64 preview](ANDROID17-PREVIEW.md) is now deliverable
-at the user's request. It is the unchanged, physically tested packet-path APK,
-with an API/ABI-checked installer. The complete application gate remains open.
+At the user's request (2026-10-30), the [two-device preview](TWO-DEVICE-PREVIEW.md)
+uses the Mi 10 Pro / API 30 and 25060RK16C / API 37 physical results. It contains
+each unchanged tested APK with an API/ABI/model-checked installer. Emulator
+failures remain recorded, without blocking this explicitly limited delivery;
+the complete application gate remains open.
 
 This branch is an **unfinished packet-path prototype**, not a completed combined
 VPN. Normal builds retain the original service behavior. An explicit development

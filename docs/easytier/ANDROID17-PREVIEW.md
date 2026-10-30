@@ -1,5 +1,8 @@
 # Android 17 预览版交付（2026-10-29）
 
+本页保留旧单设备交付。2026-10-30 用户改为按两台已验收真机交付，当前入口为
+[双真机预览说明](TWO-DEVICE-PREVIEW.md)。旧包、APK 与安装器不修改。
+
 按本次选择，先面向 **Android 17 / API 37、arm64 真机**交付有限功能预览包。
 安装包与已经在用户手机验收的 APK 完全相同，不重新编译、不修改签名或运行行为。
 它是独立应用 `com.github.metacubex.clash.meshprototype.meta`，桌面名称仍为
