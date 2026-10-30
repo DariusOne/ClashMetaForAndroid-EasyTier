@@ -152,7 +152,7 @@ subprojects {
             }
             if (providers.gradleProperty("nativeMeshHarness").orNull == "true") {
                 all {
-                    val label = if (nativeMeshDiagnosticApi30) "CMFA + EasyTier A11 Diagnostic" else "CMFA + EasyTier Prototype"
+                    val label = "Clash Easytier"
                     resValue("string", "launch_name", label)
                     resValue("string", "application_name", label)
                 }
@@ -162,9 +162,15 @@ subprojects {
         sourceSets {
             getByName("meta") {
                 java.srcDirs("src/foss/java")
+                if (isApp && providers.gradleProperty("nativeMeshHarness").orNull == "true") {
+                    res.srcDir("src/nativeMesh/res")
+                }
             }
             getByName("alpha") {
                 java.srcDirs("src/foss/java")
+                if (isApp && providers.gradleProperty("nativeMeshHarness").orNull == "true") {
+                    res.srcDir("src/nativeMesh/res")
+                }
             }
         }
 

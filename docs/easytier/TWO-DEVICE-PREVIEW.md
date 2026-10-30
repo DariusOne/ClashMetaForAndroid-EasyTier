@@ -21,14 +21,20 @@
 
 详细证据：[Android 11 真机](ANDROID11-PHYSICAL-20261030.md)、[Android 17 真机](PHYSICAL-COMPARISON-20261029.md)。
 
-## 同包保留两份原 APK
+## Clash Easytier 名称和图标版
 
-本包不重新编译、不改签名，也不把一个 APK 当成在两台设备上都已测过。安装器分别选择各自实测的原文件：
+两个预览包的应用名称均为 **Clash Easytier**，图标使用用户提供的 PNG 原文件。Android adaptive icon 加入安全区留白；旧单色主题图层已移除，不再显示旧图标。
 
-- `cmfa-easytier-android11-preview.apk`：SHA-256 `01906d5b2366e24fe993f1f09d27a84f21eb3a415e716c713435785b2b9bee4f`。
-- `cmfa-easytier-android17-preview.apk`：SHA-256 `f6560523b63b9b9a437cd7b20be643dea47be7da538c6c7e86da254e28cf404a`。
+这次只重建名称与图标资源，并重新签名。每份 APK 的 27 个 DEX、12 个原生库、原始 AndroidManifest.xml、assets 和其余非资源文件均与各自实测基线逐字节相同；既有资源 ID 和非品牌资源值保持一致，非品牌资源文件沿用原字节。没有重新编译网络代码，也没有重新执行网络验收，不能把新 APK 的摘要当成历史实测文件摘要。
 
-两个 APK 都使用独立包名 `com.github.metacubex.clash.meshprototype.meta`，可与原版 CMFA、EasyTier 共存。Android 11 桌面名称仍为 **CMFA + EasyTier A11 Diagnostic**；Android 17 仍为 **CMFA + EasyTier Prototype**。保留这些标签是为了交付相同二进制文件；本轮明确接受它们作为有限范围预览，仍不是通用 Release。
+| 文件 | SHA-256 |
+| --- | --- |
+| `clash-easytier-android11-preview.apk` | `90faa07c4e1db51abb1d08b33d433992fe8f947ac0b259ac4b3de7fbc62fb14f` |
+| `clash-easytier-android17-preview.apk` | `84b66b14025e30203751008be9a18f97ae13894122b7409017f989dacab6c8fe` |
+
+实测基线摘要仍保存在 `device-preview.json` 的 `tested_baseline_sha256`；旧交付目录和 ZIP 原样保留。资源合并工具为 `scripts/rebrand-preview.py`，构建时固定 Apktool 3.0.3；未来原生构建通过 `app/src/nativeMesh/res/` 使用同一图标，普通上游构建不受影响。
+
+两个包仍使用独立包名 `com.github.metacubex.clash.meshprototype.meta`，可与原版 CMFA、EasyTier 共存。新的本地签名私钥受当前 Windows 用户专有 ACL 保护，不在仓库或交付包内。**它与旧 CI 调试签名不同，不能直接覆盖旧签名原型。** 如已安装旧原型，先导出自己的 YAML/TOML 和需保留的数据，再自行决定是否卸载旧原型后安装新包；安装器不会自动卸载或清数据。
 
 安装器按 API、Android 主版本、arm64 架构和机型匹配，不接受其他组合或模拟器。该检查不含设备序列号，也不能把同型号其他手机、其他固件自动变成已实测。系统升级后应重新核对；不要手动混装来绕过适配检查。
 
@@ -81,4 +87,4 @@ TOML 不使用 `no_tun=true`、`use_smoltcp=true`；MTU 为 1280–1380。默认
 
 `device-preview.json` 锁定每台设备对应 APK、源码提交和私密验收结果摘要。`SHA256SUMS.txt` 覆盖本包文件。`build-verification/` 保留构建阶段验证记录，其中 `device_validated=false` 表示该记录生成于真机验收之前；实际真机结果见上表及对应报告。
 
-两份 APK 的完整源码分别位于本仓库的上表提交，锁定子模块和补丁保持对应版本。上游许可证位于 `licenses/`。本包不承诺稳定发布签名；以后更换构建签名可能无法覆盖安装，工具不会绕过签名校验。
+两份 APK 的执行代码源码分别位于本仓库的上表提交，锁定子模块和补丁保持对应版本；本轮品牌资源与合并工具保存在当前分支。上游许可证位于 `licenses/`。后续同系列本地重打包保留当前签名密钥；CI 自动构建不自动获得该私钥，不能视作相同签名。

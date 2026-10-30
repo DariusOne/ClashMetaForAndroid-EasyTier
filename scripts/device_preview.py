@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify two exact tested APKs; install only for a matching physical device.
+"""Verify two branded previews; install only for a matching physical device.
 
 Default is offline. No VPN startup, configuration import, uninstall, signature
 bypass or access to another application's data. Older evidence is not erased.
@@ -17,16 +17,18 @@ from android17_preview import Adb as BaseAdb, PreviewError, PACKAGE
 ENTRIES = {
     "android11-mi10pro": {
         "api": 30, "android": "11", "abi": "arm64-v8a", "model": "Mi 10 Pro",
-        "apk": "cmfa-easytier-android11-preview.apk", "bytes": 212224250,
-        "sha256": "01906d5b2366e24fe993f1f09d27a84f21eb3a415e716c713435785b2b9bee4f",
+        "apk": "clash-easytier-android11-preview.apk", "bytes": 230189321,
+        "sha256": "90faa07c4e1db51abb1d08b33d433992fe8f947ac0b259ac4b3de7fbc62fb14f",
+        "tested_baseline_sha256": "01906d5b2366e24fe993f1f09d27a84f21eb3a415e716c713435785b2b9bee4f",
         "source_commit": "07d848b8edae1df68e6ba8d4743bb7051058c38d",
         "manifest_min_sdk": 30, "manifest_target_sdk": 35,
         "result_sha256": "f7cd61152bad3c058c769adf68618f29da38362b6e1c9db7a4ced6aec3300a44",
     },
     "android17-25060rk16c": {
         "api": 37, "android": "17", "abi": "arm64-v8a", "model": "25060RK16C",
-        "apk": "cmfa-easytier-android17-preview.apk", "bytes": 212118858,
-        "sha256": "f6560523b63b9b9a437cd7b20be643dea47be7da538c6c7e86da254e28cf404a",
+        "apk": "clash-easytier-android17-preview.apk", "bytes": 230086881,
+        "sha256": "84b66b14025e30203751008be9a18f97ae13894122b7409017f989dacab6c8fe",
+        "tested_baseline_sha256": "f6560523b63b9b9a437cd7b20be643dea47be7da538c6c7e86da254e28cf404a",
         "source_commit": "39ef3fe5c8381dc2c25e0422cca9712866060f4e",
         "manifest_min_sdk": 31, "manifest_target_sdk": 35,
         "result_sha256": "7a83b394cfcc5ae3f4725b46c9fd54b04dacd43be0133b019ea36be84880272f",
@@ -36,9 +38,12 @@ ENTRIES = {
 
 def expected_manifest():
     return {
-        "schema": 1, "channel": "two-physical-devices-preview", "package": PACKAGE,
+        "schema": 2, "channel": "two-physical-devices-branded-preview", "package": PACKAGE,
+        "application_name": "Clash Easytier",
+        "branding_only": True, "executable_entries_unchanged": True,
+        "branded_network_retested": False,
         "devices": ENTRIES, "complete_integration": False, "production_ui_complete": False,
-        "acceptance_basis": "two authorized physical-device finite-window results",
+        "acceptance_basis": "resource-only derivatives of two physical-device finite-window baselines",
         "emulator_failures_retained": True,
     }
 
@@ -48,7 +53,8 @@ def validate_manifest(value):
         raise PreviewError("PREVIEW_MANIFEST_MISMATCH")
     if value != expected_manifest():
         raise PreviewError("PREVIEW_MANIFEST_MISMATCH")
-    for flag in ("complete_integration", "production_ui_complete", "emulator_failures_retained"):
+    for flag in ("complete_integration", "production_ui_complete", "emulator_failures_retained",
+                 "branding_only", "executable_entries_unchanged", "branded_network_retested"):
         if type(value[flag]) is not bool:
             raise PreviewError("PREVIEW_MANIFEST_MISMATCH")
 
@@ -105,7 +111,7 @@ def main(argv=None):
     parser.add_argument("--serial", help="Select explicitly when multiple devices are connected")
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--device-check", action="store_true", help="Read-only device and APK selection check")
-    modes.add_argument("--install", action="store_true", help="Install only the device's tested preview APK")
+    modes.add_argument("--install", action="store_true", help="Install only the device's resource-branded preview APK")
     args = parser.parse_args(argv)
     try:
         apks = verify_bundle(args.bundle)
@@ -116,7 +122,7 @@ def main(argv=None):
             target = Adb(args.adb, args.serial).check_platform()
             print("PREVIEW_DEVICE_OK: " + target + "; no device changes made.")
         else:
-            print("PREVIEW_APKS_VERIFIED: both exact tested APKs; no ADB/network/device actions.")
+            print("PREVIEW_APKS_VERIFIED: both branded APKs; network evidence belongs to their unchanged-code baselines; no ADB/device actions.")
         return 0
     except PreviewError as error:
         print(str(error), file=sys.stderr)

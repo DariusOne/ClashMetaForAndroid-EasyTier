@@ -1,9 +1,9 @@
-## Clash Meta for Android + native EasyTier (work in progress)
+## Clash Easytier (work in progress)
 
 **双真机预览版：以已验收的 Android 11 / Android 17 真机交付原生 IPv4 数据通道，完整整合仍在开发。**
 只让 EasyTier 管理的地址进入组网，其余流量保留 CMFA 原配置语义。
 当前交付范围为 **Mi 10 Pro / API 30** 与 **25060RK16C / API 37** 两台已测 arm64 真机。
-同一包内分别保留两份精确实测 APK，由安装器按 API、架构和机型选择，不重新编译或修改其行为。
+两个预览包的名称统一为 **Clash Easytier**，使用用户指定图标；保留各自真机基线的全部 DEX、原生库、Manifest 和 assets 原字节，仅更新品牌资源并重新签名。安装器按 API、架构和机型选择；本轮没有重新执行网络验收，旧实测 APK 原样保留。
 安装、分开导入 YAML/TOML、功能限制及回退见 [双真机交付说明](docs/easytier/TWO-DEVICE-PREVIEW.md)。
 模拟器历史失败保留；按用户选择不再作为这两台真机有限预览交付的否决条件，不改标为通过。
 其他机型、系统版本及未完成的功能仍需各自验收；[旧 Android 17 包](docs/easytier/ANDROID17-PREVIEW.md)保留。

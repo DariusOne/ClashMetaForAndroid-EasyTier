@@ -36,8 +36,8 @@ def main():
     minimum = re.search(r"^sdkVersion:'(\d+)'", badging, re.M)
     if not minimum or int(minimum[1]) != expected_minimum:
         raise RuntimeError("Native integration APK minimum differs from explicit build kind")
-    if args.android11_diagnostic and "CMFA + EasyTier A11 Diagnostic" not in badging:
-        raise RuntimeError("API 30 build must be explicitly labelled diagnostic")
+    if "application-label:'Clash Easytier'" not in badging:
+        raise RuntimeError("Native preview application label differs from requested branding")
     manifest = subprocess.check_output([str(tools[-1]), "dump", "xmltree", str(apk), "AndroidManifest.xml"], text=True)
     if sum('"android.net.VpnService"' in line for line in manifest.splitlines()) != 1 or '":native_mesh"' not in manifest:
         raise RuntimeError("Unexpected VPN/engine process manifest")
