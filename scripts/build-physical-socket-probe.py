@@ -36,7 +36,7 @@ def main():
             raise RuntimeError(value.stderr[:4000] or 'Fixture compiler failed')
     manifest = out/'AndroidManifest.xml'
     manifest.write_text(f'''<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{PACKAGE}">
-<uses-sdk android:minSdkVersion="31" android:targetSdkVersion="35"/>
+<uses-sdk android:minSdkVersion="30" android:targetSdkVersion="35"/>
 <uses-permission android:name="android.permission.INTERNET"/>
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
@@ -50,7 +50,7 @@ def main():
     editor = ROOT/'diagnostics/physical-app-probe/SetFixtureText.java'
     keeper = ROOT/'diagnostics/physical-app-probe/ProbeKeepAliveService.java'
     run('javac', '--release', '8', '-cp', jar, '-d', classes, source, editor, keeper)
-    run('java', '-cp', sdk/'lib/d8.jar', 'com.android.tools.r8.D8', '--min-api', '31',
+    run('java', '-cp', sdk/'lib/d8.jar', 'com.android.tools.r8.D8', '--min-api', '30',
         '--lib', jar, '--output', dex, *sorted(classes.rglob('*.class')))
     exe = '.exe' if os.name == 'nt' else ''
     unsigned, aligned = out/'unsigned.apk', out/'socket-probe.apk'
@@ -66,7 +66,7 @@ def main():
     run('java', '-Djava.io.tmpdir='+str(out), '-jar', sdk/'lib/apksigner.jar', 'sign', '--ks', key,
         '--ks-pass', 'pass:fixture-only', aligned)
     run('java', '-jar', sdk/'lib/apksigner.jar', 'verify', aligned)
-    result = {'package': PACKAGE, 'vpn_service': False, 'min_sdk': 31,
+    result = {'package': PACKAGE, 'vpn_service': False, 'min_sdk': 30,
               'source_sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
               'editor_source_sha256': hashlib.sha256(editor.read_bytes()).hexdigest(),
               'keeper_source_sha256': hashlib.sha256(keeper.read_bytes()).hexdigest(),

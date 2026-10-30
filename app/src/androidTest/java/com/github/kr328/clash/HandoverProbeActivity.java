@@ -65,7 +65,7 @@ public final class HandoverProbeActivity extends Activity {
             return "com.github.metacubex.clash.meshprototype.meta";
         }
         if (!"com.github.metacubex.clash.socketprobe".equals(getPackageName()) || emulator ||
-                Build.VERSION.SDK_INT < 31 ||
+                Build.VERSION.SDK_INT < 30 ||
                 !"authorized-physical-only".equals(getIntent().getStringExtra("guard")))
             throw new IOException("FIXTURE_GUARD_FAILED");
         File marker = new File(getNoBackupFilesDir(), "physical-probe-consent.json");

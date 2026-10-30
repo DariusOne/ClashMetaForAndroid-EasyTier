@@ -20,6 +20,18 @@ buildscript {
     }
 }
 
+// Explicit debug-only backport for an authorized API 30 physical comparison.
+// It does not alter the pinned Android 17 delivery or normal build defaults.
+val nativeMeshDiagnosticApi30 = providers.gradleProperty("nativeMeshDiagnosticApi30").orNull == "true"
+check(!nativeMeshDiagnosticApi30 || providers.gradleProperty("nativeMeshHarness").orNull == "true") {
+    "API 30 diagnostics require the separate native harness"
+}
+gradle.taskGraph.whenReady {
+    check(!nativeMeshDiagnosticApi30 || allTasks.none { it.name.contains("release", ignoreCase = true) }) {
+        "API 30 diagnostics are debug-only and cannot produce a release"
+    }
+}
+
 subprojects {
     repositories {
         mavenCentral()
@@ -47,6 +59,7 @@ subprojects {
         defaultConfig {
             val nativeMeshHarness = providers.gradleProperty("nativeMeshHarness").orNull == "true"
             buildConfigField("boolean", "NATIVE_MESH_HARNESS", nativeMeshHarness.toString())
+            buildConfigField("int", "NATIVE_MESH_MIN_API", if (nativeMeshDiagnosticApi30) "30" else "31")
             if (isApp) {
                 val customApplicationId = queryConfigProperty("custom.application.id") as? String?
                 applicationId = customApplicationId.takeIf { it?.isNotBlank() == true } ?: "com.github.metacubex.clash"
@@ -60,7 +73,7 @@ subprojects {
 
             // Native combined mode supports Android 12+; the upstream-like
             // proxy-only build keeps its independent compatibility contract.
-            minSdk = if (nativeMeshHarness) 31 else 21
+            minSdk = if (nativeMeshHarness) { if (nativeMeshDiagnosticApi30) 30 else 31 } else 21
             targetSdk = 35
 
             versionName = "2.11.36"
@@ -139,8 +152,9 @@ subprojects {
             }
             if (providers.gradleProperty("nativeMeshHarness").orNull == "true") {
                 all {
-                    resValue("string", "launch_name", "CMFA + EasyTier Prototype")
-                    resValue("string", "application_name", "CMFA + EasyTier Prototype")
+                    val label = if (nativeMeshDiagnosticApi30) "CMFA + EasyTier A11 Diagnostic" else "CMFA + EasyTier Prototype"
+                    resValue("string", "launch_name", label)
+                    resValue("string", "application_name", label)
                 }
             }
         }

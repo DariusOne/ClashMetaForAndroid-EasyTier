@@ -293,7 +293,7 @@ class PacketHarness private constructor(private val vpn: VpnService, private val
     companion object {
         fun configured(vpn: VpnService, scope: CoroutineScope): PacketHarness? {
             if (!BuildConfig.NATIVE_MESH_HARNESS) return null
-            check(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) { "ET_ANDROID_12_REQUIRED" }
+            check(Build.VERSION.SDK_INT >= BuildConfig.NATIVE_MESH_MIN_API) { "ET_ANDROID_API_REQUIRED" }
             val marker = File(vpn.noBackupFilesDir, "native-mesh-acceptance/enable")
             return if (marker.isFile && marker.length() < 64 && marker.readText().trim() == "packet-path-only") PacketHarness(vpn, scope) else null
         }

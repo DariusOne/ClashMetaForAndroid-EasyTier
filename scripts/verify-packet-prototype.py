@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check prototype APK identity and native payload; no device claims."""
 import hashlib
+import argparse
 import json
 import os
 from pathlib import Path
@@ -13,7 +14,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main():
-    output = Path(sys.argv[1])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("output", type=Path)
+    parser.add_argument("--android11-diagnostic", action="store_true")
+    args = parser.parse_args()
+    output = args.output
+    expected_minimum = 30 if args.android11_diagnostic else 31
     apks = list(output.glob("*universal*.apk"))
     if len(apks) != 1:
         raise RuntimeError("Expected one universal prototype APK")
@@ -28,8 +34,10 @@ def main():
     if not package or package[1] != "com.github.metacubex.clash.meshprototype.meta":
         raise RuntimeError("Prototype must have a separate application identity")
     minimum = re.search(r"^sdkVersion:'(\d+)'", badging, re.M)
-    if not minimum or int(minimum[1]) != 31:
-        raise RuntimeError("Native integration APK must require Android 12 / API 31")
+    if not minimum or int(minimum[1]) != expected_minimum:
+        raise RuntimeError("Native integration APK minimum differs from explicit build kind")
+    if args.android11_diagnostic and "CMFA + EasyTier A11 Diagnostic" not in badging:
+        raise RuntimeError("API 30 build must be explicitly labelled diagnostic")
     manifest = subprocess.check_output([str(tools[-1]), "dump", "xmltree", str(apk), "AndroidManifest.xml"], text=True)
     if sum('"android.net.VpnService"' in line for line in manifest.splitlines()) != 1 or '":native_mesh"' not in manifest:
         raise RuntimeError("Unexpected VPN/engine process manifest")
@@ -50,7 +58,7 @@ def main():
                         raise RuntimeError("Input native artifact changed")
                 libraries[f"{abi}/{name}"] = {"sha256": digest, "bytes": len(data)}
     result = {"schema": 1, "package": package[1], "min_sdk": int(minimum[1]), "apk_sha256": hashlib.sha256(apk.read_bytes()).hexdigest(),
-              "native_libraries": libraries, "kind": "packet-path-development-prototype",
+              "native_libraries": libraries, "kind": "android11-physical-diagnostic" if args.android11_diagnostic else "packet-path-development-prototype",
               "complete_integration": False, "device_validated": False}
     (output / "prototype-verification.json").write_text(json.dumps(result, indent=2)+"\n", encoding="utf-8")
     print(json.dumps({"package": package[1], "min_sdk": int(minimum[1]), "native_payloads": len(libraries), "device_validated": False}))
